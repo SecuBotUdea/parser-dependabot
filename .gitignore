@@ -209,3 +209,47 @@ __marimo__/
 venv/
 __pycache__/
 .env
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Env files / secrets
+.env
+.env.* 
+.env.local
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Coverage / reports
+.coverage
+htmlcov/
+reports/
+
+# Mypy / other caches
+.mypy_cache/
+.cache/
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# Node (if any)
+node_modules/

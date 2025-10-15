@@ -1,0 +1,21 @@
+[project]
+name = "parser-dependabot"
+version = "0.0.0"
+description = "Parser/handler para webhooks de Dependabot"
+authors = [{ name = "Camilo Aguirre", email = "bcamilo.aguirre@udea.edu.co" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-dotenv",
+    "pydantic",
+    "psycopg2-binary",
+    "httpx"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pre-commit"
+]
