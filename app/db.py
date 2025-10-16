@@ -1,13 +1,16 @@
 import os
-from psycopg2.extras import Json
+
 import psycopg2
+from psycopg2.extras import Json
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 def get_conn():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL not set")
     return psycopg2.connect(DATABASE_URL)
+
 
 def upsert_alert(alert: dict):
     """
@@ -27,13 +30,16 @@ def upsert_alert(alert: dict):
                   last_seen_at = now();
                 """
                 repo = alert["id"].split("#")[0]
-                cur.execute(sql, (
-                    alert["id"],
-                    repo,
-                    Json(alert),  # normalized
-                    Json(alert.get("raw", {})),
-                    alert.get("source", "dependabot"),
-                    alert.get("created_at", None)
-                ))
+                cur.execute(
+                    sql,
+                    (
+                        alert["id"],
+                        repo,
+                        Json(alert),  # normalized
+                        Json(alert.get("raw", {})),
+                        alert.get("source", "dependabot"),
+                        alert.get("created_at", None),
+                    ),
+                )
     finally:
         conn.close()

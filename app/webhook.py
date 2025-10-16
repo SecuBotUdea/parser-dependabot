@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-import os, hmac, hashlib
-from dotenv import load_dotenv
+import hashlib
+import hmac
+import os
 from typing import Optional
-from .mapper import map_dependabot_payload
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+
 from .db import upsert_alert
+from .mapper import map_dependabot_payload
 
 # Cargar variables de entorno
 load_dotenv()
@@ -13,6 +17,7 @@ router = APIRouter()
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or ""
 WEBHOOK_SECRET_BYTES = WEBHOOK_SECRET.encode()
 
+
 def _to_bytes(x: Optional[bytes | str]) -> bytes:
     if x is None:
         return b""
@@ -20,7 +25,10 @@ def _to_bytes(x: Optional[bytes | str]) -> bytes:
         return bytes(x)
     return str(x).encode()
 
-def verify_signature(body: bytes, signature_header: str, secret_bytes: Optional[bytes | str] = None) -> bool:
+
+def verify_signature(
+    body: bytes, signature_header: str, secret_bytes: Optional[bytes | str] = None
+) -> bool:
     """
     Verifica 'X-Hub-Signature-256' (formato "sha256=<hex>") contra body.
     - normaliza tipos y espacios
@@ -62,6 +70,7 @@ def verify_signature(body: bytes, signature_header: str, secret_bytes: Optional[
 
     # Comparación segura en tiempo constante
     return hmac.compare_digest(expected_hex, signature)
+
 
 @router.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):

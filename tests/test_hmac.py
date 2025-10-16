@@ -1,6 +1,9 @@
 # tests/test_hmac.py
-import hmac, hashlib
+import hashlib
+import hmac
+
 from app.webhook import verify_signature
+
 
 def test_verify_signature_valid():
     body = b'{"foo":"bar"}'
@@ -8,6 +11,7 @@ def test_verify_signature_valid():
     mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256).hexdigest()
     header = f"sha256={mac}"
     assert verify_signature(body, header, secret_bytes=secret) is True
+
 
 def test_verify_signature_invalid():
     body = b'{"foo":"bar"}'
