@@ -50,11 +50,16 @@ jobs:
           pre-commit run --all-files || true
 
       - name: Run tests
-        run: pytest -q
+        run: |
+          pytest -q --junitxml=reports/junit.xml --cov=app --cov-report=xml:reports/coverage.xml --cov-report=html:htmlcov || true
 
       - name: Upload pytest results (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pytest-report-${{ matrix.python-version }}
-          path: .pytest_cache || ./reports || ./htmlcov || test-results || ''
+          path: |
+            .pytest_cache
+            reports
+            htmlcov
+            test-results
