@@ -2,12 +2,11 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 import os, hmac, hashlib
 from dotenv import load_dotenv
 from typing import Optional
+from .mapper import map_dependabot_payload
+from .db import upsert_alert
 
 # Cargar variables de entorno
 load_dotenv()
-
-from .mapper import map_dependabot_payload
-from .db import upsert_alert
 
 router = APIRouter()
 
