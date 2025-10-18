@@ -72,6 +72,12 @@ def verify_signature(
     return hmac.compare_digest(expected_hex, signature)
 
 
+payload = await request.json()
+if payload.get("zen") or payload.get("hook_id") or payload.get("hook"):
+    # ping o evento de prueba; responde ok rápido
+    return {"status": "pong"}
+
+
 @router.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     # Leemos cuerpo y firma
