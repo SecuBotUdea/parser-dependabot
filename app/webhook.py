@@ -1,7 +1,7 @@
 import hashlib
 import hmac
-import os
 import logging
+import os
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -100,7 +100,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         # Solo para debug opcional (no activar en prod)
         if DEBUG:
             try:
-                import hashlib, hmac
+                import hashlib
+                import hmac
+
                 secret = (os.getenv("WEBHOOK_SECRET") or "").encode()
                 mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
                 expected = "sha256=" + mac.hexdigest()
