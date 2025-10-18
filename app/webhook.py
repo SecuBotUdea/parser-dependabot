@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import os
+import logging
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -16,6 +17,12 @@ router = APIRouter()
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or ""
 WEBHOOK_SECRET_BYTES = WEBHOOK_SECRET.encode()
+
+# Configurar logger básico
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("webhook")
+
+DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
 
 def _to_bytes(x: Optional[bytes | str]) -> bytes:
@@ -34,19 +41,15 @@ def verify_signature(
     - normaliza tipos y espacios
     - acepta secret_bytes como bytes o str (si no se pasa, usa WEBHOOK_SECRET_BYTES)
     """
-    # Asegúrate de que body es bytes
     if not isinstance(body, (bytes, bytearray)):
-        # si te viene str, codifícalo (evitar en producción: garantizar bytes desde Request)
         body = str(body).encode()
 
-    # Normalizar header
     if not signature_header:
         return False
     if isinstance(signature_header, (bytes, bytearray)):
         signature_header = signature_header.decode()
     signature_header = signature_header.strip()
 
-    # Esperamos 'sha256=<hex>'
     if "=" not in signature_header:
         return False
     sha_name, signature = signature_header.split("=", 1)
@@ -54,47 +57,78 @@ def verify_signature(
         return False
 
     signature = signature.strip().lower()
-    # Normalizar secret
+
     if secret_bytes is None:
-        # importa o usa la variable global WEBHOOK_SECRET_BYTES definida en tu módulo
         try:
-            secret = WEBHOOK_SECRET_BYTES  # definida arriba en tu módulo
+            secret = WEBHOOK_SECRET_BYTES
         except NameError:
             secret = b""
     else:
         secret = _to_bytes(secret_bytes)
 
-    # Calcular HMAC
     mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
     expected_hex = mac.hexdigest().lower()
 
-    # Comparación segura en tiempo constante
     return hmac.compare_digest(expected_hex, signature)
-
-
-payload = await request.json()
-if payload.get("zen") or payload.get("hook_id") or payload.get("hook"):
-    # ping o evento de prueba; responde ok rápido
-    return {"status": "pong"}
 
 
 @router.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
-    # Leemos cuerpo y firma
+    """
+    Endpoint que recibe eventos de GitHub App (Dependabot, etc.)
+    - Verifica firma HMAC con X-Hub-Signature-256
+    - Responde rápido a 'ping' y evita fallos en eventos desconocidos
+    - Encola procesamiento de alertas en background
+    """
     body = await request.body()
     sig = request.headers.get("x-hub-signature-256", "")
+    event = request.headers.get("x-github-event", "")
+    delivery = request.headers.get("x-github-delivery", "")
+    encoded_secret = request.headers.get("x-github-encoded-secret")
 
-    # Verificación HMAC
+    logger.info(
+        "Webhook recibido: event=%s delivery=%s encoded_secret=%s",
+        event,
+        delivery,
+        bool(encoded_secret),
+    )
+
+    # --- Verificar firma HMAC ---
     if not verify_signature(body, sig):
-        # 400 para firma inválida (podría ser 401, pero 400 es aceptable para webhooks inválidos)
+        logger.warning("Firma inválida para delivery %s (event=%s)", delivery, event)
+
+        # Solo para debug opcional (no activar en prod)
+        if DEBUG:
+            try:
+                import hashlib, hmac
+                secret = (os.getenv("WEBHOOK_SECRET") or "").encode()
+                mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
+                expected = "sha256=" + mac.hexdigest()
+                logger.debug("DEBUG firma recibida=%s esperada=%s", sig, expected)
+            except Exception as e:
+                logger.exception("DEBUG: fallo al recalcular firma: %s", e)
+
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Parseamos JSON (si no es json, devolverá 400)
+    # --- Parsear JSON ---
     payload = await request.json()
 
-    # Mapear/normalizar -> este puede lanzar ValidationError si no cumple schema
-    normalized = map_dependabot_payload(payload)
+    # --- Manejar ping (evento de prueba) ---
+    if event == "ping" or payload.get("zen") or payload.get("hook_id"):
+        logger.info("Ping recibido (delivery=%s). Respondiendo pong.", delivery)
+        return {"status": "pong"}
 
-    # Guardar en background y responder rápido
-    background_tasks.add_task(upsert_alert, normalized)
+    # --- Procesar payload normal ---
+    try:
+        normalized = map_dependabot_payload(payload)
+    except Exception as e:
+        logger.exception("Error al mapear payload (delivery=%s): %s", delivery, e)
+        raise HTTPException(status_code=400, detail="Invalid payload format")
+
+    try:
+        background_tasks.add_task(upsert_alert, normalized)
+    except Exception as e:
+        logger.exception("Error al encolar tarea (delivery=%s): %s", delivery, e)
+        raise HTTPException(status_code=500, detail="Internal error")
+
     return {"status": "accepted"}
