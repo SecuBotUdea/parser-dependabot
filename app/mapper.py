@@ -1,8 +1,8 @@
 # secubot/mapper.py
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel
-from typing import Literal
 
 
 class PackageInfo(BaseModel):
@@ -146,7 +146,11 @@ def map_dependabot_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
     security_vulnerability = alert.get("security_vulnerability", {}) or {}
 
     # canonical id: repo_full#alert_number
-    repo_full = repo.get("full_name") or raw_payload.get("repository_full_name") or "unknown/repo"
+    repo_full = (
+        repo.get("full_name")
+        or raw_payload.get("repository_full_name")
+        or "unknown/repo"
+    )
     alert_number = alert.get("number") or raw_payload.get("id") or "unknown"
     canonical_id = f"{repo_full}#{alert_number}"
 
@@ -155,7 +159,11 @@ def map_dependabot_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
     dep_pkg = dep.get("package") if isinstance(dep, dict) else None
     if not dep_pkg:
         # fallback to security_vulnerability.package
-        dep_pkg = security_vulnerability.get("package") if isinstance(security_vulnerability.get("package"), dict) else {}
+        dep_pkg = (
+            security_vulnerability.get("package")
+            if isinstance(security_vulnerability.get("package"), dict)
+            else {}
+        )
 
     pkg_name = (dep_pkg.get("name") if isinstance(dep_pkg, dict) else None) or ""
     pkg_eco = (dep_pkg.get("ecosystem") if isinstance(dep_pkg, dict) else None) or ""
@@ -172,8 +180,12 @@ def map_dependabot_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # fixed_version: try advisory vulnerabilities first, then security_vulnerability.first_patched_version
     fixed_version = _first_patched_version(security_advisory)
-    if not fixed_version and isinstance(security_vulnerability.get("first_patched_version"), dict):
-        fixed_version = security_vulnerability.get("first_patched_version", {}).get("identifier")
+    if not fixed_version and isinstance(
+        security_vulnerability.get("first_patched_version"), dict
+    ):
+        fixed_version = security_vulnerability.get("first_patched_version", {}).get(
+            "identifier"
+        )
 
     package_obj = {
         "name": pkg_name,
@@ -188,7 +200,9 @@ def map_dependabot_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # severity normalization
     severity = _normalize_severity(
-        security_advisory.get("severity") or alert.get("severity") or security_vulnerability.get("severity")
+        security_advisory.get("severity")
+        or alert.get("severity")
+        or security_vulnerability.get("severity")
     )
 
     # cvss & cve
