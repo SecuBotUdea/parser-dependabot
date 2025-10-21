@@ -52,10 +52,14 @@ jobs:
           pip install pre-commit
           pre-commit run --all-files
 
-      - name: Run tests (generate junit + coverage)
+      - name: Run tests and collect coverage data
         run: |
-          pytest -q --junitxml=reports/junit.xml \
-            --cov=app --cov-report=xml:reports/coverage.xml --cov-report=html:htmlcov
+          coverage run --source=app -m pytest -q --junitxml=reports/junit.xml
+          coverage xml -o reports/coverage.xml
+          coverage html -d htmlcov
+
+      - name: Print coverage report to console
+        run: coverage report
 
       - name: Upload pytest results
         if: always()
