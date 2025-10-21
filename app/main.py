@@ -8,6 +8,6 @@ app = FastAPI(title="Parser Dependabot")
 app.include_router(webhook_router)
 
 
-@app.get("/health")
+@app.get("/")
 def health():
     return {"status": "ok"}
