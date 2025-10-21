@@ -1,7 +1,7 @@
 # tests/test_mapper.py
 import json
 
-from app.mapper import map_dependabot_payload
+from app.hooks.mapper import map_dependabot_payload
 
 
 def test_map_dependabot_payload_basic():

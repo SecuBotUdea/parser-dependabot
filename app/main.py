@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from .webhook import router as webhook_router
+from .hooks.webhook import router as webhook_router
 
 app = FastAPI(title="Parser Dependabot")
 

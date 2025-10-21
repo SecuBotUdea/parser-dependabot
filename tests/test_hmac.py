@@ -2,7 +2,7 @@
 import hashlib
 import hmac
 
-from app.webhook import verify_signature
+from app.hooks.webhook import verify_signature
 
 
 def test_verify_signature_valid():

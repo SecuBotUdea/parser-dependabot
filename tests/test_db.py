@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import app.db as db
+from app.hooks import db
 
 SAMPLE_ALERT = {
     "id": "PangoAguirre/aprendiendo-react#33",
@@ -43,6 +43,40 @@ def make_mock_conn_and_cursor():
     return conn, cur
 
 
+def _extract_execute_args(call):
+    """
+    Extrae (sql, params) desde call_args de un MagicMock de execute de forma robusta.
+    call es cur_mock.execute.call_args
+    """
+    pos_args = call[0] or ()
+    kw_args = call[1] or {}
+
+    sql = None
+    params = None
+
+    if len(pos_args) >= 1:
+        sql = pos_args[0]
+    if len(pos_args) >= 2:
+        params = pos_args[1]
+
+    # Intentar encontrar params en kwargs (varios nombres posibles)
+    if params is None:
+        for k in ("params", "vars", "parameters", "args"):
+            if k in kw_args:
+                params = kw_args[k]
+                break
+
+    # A veces se pasa solo sql y los parámetros como kwargs (raro), intentar detectar dict en kwargs
+    if params is None and isinstance(kw_args, dict):
+        # buscar el primer valor de tipo dict en kwargs
+        for v in kw_args.values():
+            if isinstance(v, dict):
+                params = v
+                break
+
+    return sql, params
+
+
 def test_upsert_alert_executes_sql_and_closes_connection(monkeypatch):
     # Forzar DATABASE_URL en el módulo importado
     monkeypatch.setenv("DATABASE_URL", "postgres://user:pass@localhost/db")
@@ -55,14 +89,28 @@ def test_upsert_alert_executes_sql_and_closes_connection(monkeypatch):
     # Ejecutar la función
     db.upsert_alert(SAMPLE_ALERT)
 
-    # Aserciones
+    # Aserciones: execute fue llamado
     assert cur_mock.execute.call_count == 1
-    sql, params = cur_mock.execute.call_args[0]
+
+    # Extraer sql y params de forma robusta
+    call = cur_mock.execute.call_args
+    sql, params = _extract_execute_args(call)
+
+    assert sql and isinstance(
+        sql, str
+    ), "No se pudo extraer la cadena SQL de cur.execute"
     assert "INSERT INTO alerts" in sql
+
+    assert params is not None and isinstance(
+        params, dict
+    ), f"Parámetros inesperados: {params!r}"
+
+    # Verificaciones sobre los parámetros
     assert params["id"] == SAMPLE_ALERT["id"]
     assert params["repo"] == SAMPLE_ALERT["id"].split("#")[0]
     assert "normalized" in params
     assert "raw" in params
+
     # conexión cerrada
     assert conn_mock.close.call_count == 1
 
