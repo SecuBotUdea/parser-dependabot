@@ -1,3 +1,5 @@
+# secubot/webhook.py
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -5,20 +7,19 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from .db import upsert_alert
 from .mapper import map_dependabot_payload
 
-# Cargar variables de entorno
+# Load env
 load_dotenv()
 
 router = APIRouter()
 
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET") or ""
-WEBHOOK_SECRET_BYTES = WEBHOOK_SECRET.encode()
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+WEBHOOK_SECRET_BYTES = WEBHOOK_SECRET.encode() if WEBHOOK_SECRET else b""
 
-# Configurar logger básico
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook")
 
@@ -28,109 +29,164 @@ DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 def _to_bytes(x: Optional[bytes | str]) -> bytes:
     if x is None:
         return b""
-    if isinstance(x, (bytes, bytearray)):
+    if isinstance(x, (bytes, bytearray, memoryview)):
         return bytes(x)
     return str(x).encode()
 
 
 def verify_signature(
-    body: bytes, signature_header: str, secret_bytes: Optional[bytes | str] = None
+    body: bytes,
+    signature_header: Optional[str],
+    secret_bytes: Optional[bytes | str] = None,
 ) -> bool:
-    """
-    Verifica 'X-Hub-Signature-256' (formato "sha256=<hex>") contra body.
-    - normaliza tipos y espacios
-    - acepta secret_bytes como bytes o str (si no se pasa, usa WEBHOOK_SECRET_BYTES)
-    """
-    if not isinstance(body, (bytes, bytearray)):
-        body = str(body).encode()
+    if not isinstance(body, (bytes, bytearray, memoryview)):
+        try:
+            body = str(body).encode()
+        except Exception:
+            body = b""
 
     if not signature_header:
+        if DEBUG:
+            logger.debug("verify_signature: missing signature header")
         return False
-    if isinstance(signature_header, (bytes, bytearray)):
-        signature_header = signature_header.decode()
-    signature_header = signature_header.strip()
 
+    if isinstance(signature_header, (bytes, bytearray)):
+        try:
+            signature_header = signature_header.decode("utf-8", errors="ignore")
+        except Exception:
+            signature_header = str(signature_header)
+
+    signature_header = signature_header.strip()
     if "=" not in signature_header:
+        if DEBUG:
+            logger.debug(
+                "verify_signature: signature header no '=': %r", signature_header
+            )
         return False
+
     sha_name, signature = signature_header.split("=", 1)
     if sha_name.strip().lower() != "sha256":
+        if DEBUG:
+            logger.debug("verify_signature: unsupported digest %r", sha_name)
         return False
 
     signature = signature.strip().lower()
+    secret = (
+        _to_bytes(secret_bytes)
+        if secret_bytes is not None
+        else WEBHOOK_SECRET_BYTES or b""
+    )
 
-    if secret_bytes is None:
-        try:
-            secret = WEBHOOK_SECRET_BYTES
-        except NameError:
-            secret = b""
-    else:
-        secret = _to_bytes(secret_bytes)
+    try:
+        mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
+        expected_hex = mac.hexdigest().lower()
+        result = hmac.compare_digest(expected_hex, signature)
+        if DEBUG:
+            logger.debug("verify_signature: result=%s signature=%s", result, signature)
+        return result
+    except Exception as exc:
+        logger.exception("verify_signature: unexpected error: %s", exc)
+        return False
 
-    mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
-    expected_hex = mac.hexdigest().lower()
 
-    return hmac.compare_digest(expected_hex, signature)
+async def _enqueue_upsert(alert_obj: dict) -> None:
+    """
+    Ejecuta upsert_alert en un hilo separado para evitar bloquear el event loop.
+    También captura excepciones y las loggea.
+    """
+    try:
+        # asyncio.to_thread ejecuta la función bloqueante en un hilo del pool del interprete
+        await asyncio.to_thread(upsert_alert, alert_obj)
+        logger.info("upsert_alert completed for id=%s", alert_obj.get("id"))
+    except Exception as e:
+        logger.exception(
+            "Error executing upsert_alert in background for id=%s: %s",
+            alert_obj.get("id"),
+            e,
+        )
 
 
 @router.post("/webhook")
-async def webhook(request: Request, background_tasks: BackgroundTasks):
+async def webhook(request: Request):
     """
-    Endpoint que recibe eventos de GitHub App (Dependabot, etc.)
-    - Verifica firma HMAC con X-Hub-Signature-256
-    - Responde rápido a 'ping' y evita fallos en eventos desconocidos
-    - Encola procesamiento de alertas en background
+    Endpoint GitHub App webhooks (Dependabot, …)
+    - Verifica X-Hub-Signature-256
+    - Responde rápido a ping
+    - Normaliza payload y dispara upsert_alert en background sin bloquear el loop
     """
+    if not DEBUG and not WEBHOOK_SECRET:
+        logger.error("WEBHOOK_SECRET not configured (and DEBUG is false).")
+        raise HTTPException(status_code=500, detail="Server misconfiguration")
+
     body = await request.body()
+
     sig = request.headers.get("x-hub-signature-256", "")
     event = request.headers.get("x-github-event", "")
     delivery = request.headers.get("x-github-delivery", "")
-    encoded_secret = request.headers.get("x-github-encoded-secret")
+    content_type = request.headers.get("content-type", "")
 
     logger.info(
-        "Webhook recibido: event=%s delivery=%s encoded_secret=%s",
+        "Webhook received: event=%s delivery=%s content-type=%s",
         event,
         delivery,
-        bool(encoded_secret),
+        content_type,
     )
 
-    # --- Verificar firma HMAC ---
-    if not verify_signature(body, sig):
-        logger.warning("Firma inválida para delivery %s (event=%s)", delivery, event)
+    if "application/json" not in content_type.lower():
+        logger.warning("Unexpected content-type: %s", content_type)
 
-        # Solo para debug opcional (no activar en prod)
+    if not verify_signature(body, sig):
+        logger.warning("Invalid signature for delivery %s (event=%s)", delivery, event)
         if DEBUG:
             try:
-                import hashlib
-                import hmac
-
-                secret = (os.getenv("WEBHOOK_SECRET") or "").encode()
-                mac = hmac.new(secret, msg=body, digestmod=hashlib.sha256)
-                expected = "sha256=" + mac.hexdigest()
-                logger.debug("DEBUG firma recibida=%s esperada=%s", sig, expected)
-            except Exception as e:
-                logger.exception("DEBUG: fallo al recalcular firma: %s", e)
-
+                secret_sample = (
+                    (os.getenv("WEBHOOK_SECRET") or "")[:8] + "..."
+                    if os.getenv("WEBHOOK_SECRET")
+                    else "<empty>"
+                )
+                hmac.new(
+                    (os.getenv("WEBHOOK_SECRET") or "").encode(),
+                    msg=body,
+                    digestmod=hashlib.sha256,
+                )
+                logger.debug(
+                    "DEBUG signature received=%s expected=sha256=... secret_sample=%s",
+                    sig,
+                    secret_sample,
+                )
+            except Exception:
+                logger.debug("DEBUG: could not recompute expected signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # --- Parsear JSON ---
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception as e:
+        logger.exception("Invalid JSON body for delivery %s: %s", delivery, e)
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # --- Manejar ping (evento de prueba) ---
-    if event == "ping" or payload.get("zen") or payload.get("hook_id"):
-        logger.info("Ping recibido (delivery=%s). Respondiendo pong.", delivery)
+    # ping handling
+    if event == "ping" or (
+        isinstance(payload, dict) and (payload.get("zen") or payload.get("hook_id"))
+    ):
+        logger.info("Ping received (delivery=%s). Responding pong.", delivery)
         return {"status": "pong"}
 
-    # --- Procesar payload normal ---
+    # map payload
     try:
         normalized = map_dependabot_payload(payload)
     except Exception as e:
-        logger.exception("Error al mapear payload (delivery=%s): %s", delivery, e)
+        logger.exception("Error mapping payload (delivery=%s): %s", delivery, e)
         raise HTTPException(status_code=400, detail="Invalid payload format")
 
+    # schedule the DB upsert without blocking
     try:
-        background_tasks.add_task(upsert_alert, normalized)
+        # create_task sobre la coroutine que usa asyncio.to_thread
+        asyncio.create_task(_enqueue_upsert(normalized))
     except Exception as e:
-        logger.exception("Error al encolar tarea (delivery=%s): %s", delivery, e)
-        raise HTTPException(status_code=500, detail="Internal error")
+        logger.exception("Error scheduling upsert task (delivery=%s): %s", delivery, e)
+        raise HTTPException(
+            status_code=500, detail="Internal error scheduling background work"
+        )
 
+    logger.info("Accepted alert (delivery=%s id=%s)", delivery, normalized.get("id"))
     return {"status": "accepted"}
