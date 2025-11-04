@@ -20,6 +20,6 @@ app.include_router(webhook_router)
 
 
 # ---------- Ruta de salud ----------
-@app.get("/", tags=["health"])
+@app.get("/")
 def health_check():
     return {"status": "ok"}
