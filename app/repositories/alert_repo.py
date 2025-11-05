@@ -1,5 +1,7 @@
 from supabase import Client
-from models.alert_model import AlertModel
+
+from app.models.alert_model import AlertModel
+
 
 class AlertRepository:
     def __init__(self, supabase: Client):
