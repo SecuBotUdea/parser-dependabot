@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from hooks.webhook import router as webhook_router
+
+from app.hooks.webhook import router as webhook_router
 
 """@asynccontextmanager
 async def lifespan_handler(app: FastAPI):

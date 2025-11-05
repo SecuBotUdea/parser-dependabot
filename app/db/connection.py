@@ -2,8 +2,9 @@ from contextlib import contextmanager
 from typing import Optional
 
 import psycopg2
-from config import DATABASE_URL, POOL_MAXCONN, POOL_MINCONN
 from psycopg2.pool import SimpleConnectionPool
+
+from app.config import DATABASE_URL, POOL_MAXCONN, POOL_MINCONN
 
 _pool: Optional[SimpleConnectionPool] = None
 
