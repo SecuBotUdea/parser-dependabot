@@ -1,8 +1,9 @@
 from typing import Dict
 
 from db.connection import get_conn
-from models.alert import AlertModel
 from psycopg2.extras import Json
+
+from app.models.alert_model import AlertModel
 
 UPSERT_SQL = """
 INSERT INTO alerts (

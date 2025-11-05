@@ -11,7 +11,8 @@ dependencies = [
     "python-dotenv",
     "pydantic",
     "psycopg2-binary",
-    "httpx"
+    "httpx",
+    "supabase"
 ]
 
 [project.optional-dependencies]

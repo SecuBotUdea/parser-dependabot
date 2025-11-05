@@ -1,12 +1,13 @@
+import os
 from contextlib import contextmanager
-from typing import Optional
 
 import psycopg2
-from psycopg2.pool import SimpleConnectionPool
 
-from app.config import DATABASE_URL, POOL_MAXCONN, POOL_MINCONN
+DATABASE_URL = os.getenv("DATABASE_URL")
+POOL_MINCONN = int(os.getenv("POOL_MINCONN", "1"))
+POOL_MAXCONN = int(os.getenv("POOL_MAXCONN", "10"))
 
-_pool: Optional[SimpleConnectionPool] = None
+_pool = None
 
 
 def init_pool():
@@ -15,36 +16,39 @@ def init_pool():
         return
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL not set")
-    _pool = SimpleConnectionPool(POOL_MINCONN, POOL_MAXCONN, dsn=DATABASE_URL)
 
-
-def close_pool():
-    global _pool
-    if _pool:
-        _pool.closeall()
-        _pool = None
+    _pool = psycopg2.pool.SimpleConnectionPool(
+        POOL_MINCONN,
+        POOL_MAXCONN,
+        dsn=DATABASE_URL,
+        connect_timeout=10,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+    )
 
 
 @contextmanager
 def get_conn():
-    """
-    Context manager that yields a connection from the pool (or a direct conn if pool unavailable).
-    Always closes/returns the connection.
-    """
-    global _pool
-    if _pool is None:
-        # fallback: create transient connection (not ideal for production)
-        if not DATABASE_URL:
-            raise RuntimeError("DATABASE_URL not set")
-        conn = psycopg2.connect(DATABASE_URL)
-        try:
-            yield conn
-        finally:
-            conn.close()
-        return
-
-    conn = _pool.getconn()
+    conn = None
     try:
+        if _pool is None:
+            init_pool()
+        conn = _pool.getconn()
         yield conn
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
     finally:
-        _pool.putconn(conn)
+        if conn:
+            _pool.putconn(conn)
+
+
+def close_pool():
+    global _pool
+    if _pool is not None:
+        _pool.closeall()
+        _pool = None
