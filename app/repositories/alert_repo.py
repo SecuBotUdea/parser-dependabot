@@ -1,23 +1,34 @@
+from typing import Optional
+
 from supabase import Client
 
 from app.models.alert_model import AlertModel
+from app.repositories.base_repo import BaseRepository
 
 
-class AlertRepository:
+class AlertRepository(BaseRepository[AlertModel]):
+    """Repositorio para manejar operaciones de Alert en Supabase."""
+
     def __init__(self, supabase: Client):
         self.supabase = supabase
+        self.table_name = "alerts"
 
-    def upsert_alert(self, alert: AlertModel):
-        data = alert.model_dump()
-        response = self.supabase.table("alerts").upsert(data).execute()
-        return response.data
+    def upsert(self, entity: AlertModel) -> AlertModel:
+        """Inserta o actualiza un alert."""
+        data = entity.model_dump()
+        response = self.supabase.table(self.table_name).upsert(data).execute()
+        return AlertModel(**response.data[0])
 
-    def get_alert_by_id(self, alert_id: int):
-        response = (
-            self.supabase.table("alerts")
-            .select("*")
-            .eq("id", alert_id)
-            .single()
-            .execute()
-        )
-        return response.data
+    def get_by_id(self, entity_id: str) -> Optional[AlertModel]:
+        """Obtiene un alert por su ID."""
+        try:
+            response = (
+                self.supabase.table(self.table_name)
+                .select("*")
+                .eq("id", entity_id)
+                .single()
+                .execute()
+            )
+            return AlertModel(**response.data) if response.data else None
+        except Exception:
+            return None

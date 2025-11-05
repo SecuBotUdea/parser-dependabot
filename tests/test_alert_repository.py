@@ -1,4 +1,5 @@
 import pytest
+
 from app.core.config import get_supabase
 from app.models.alert_model import AlertModel
 from app.repositories.alert_repo import AlertRepository
@@ -25,17 +26,18 @@ def test_upsert_new_alert(alert_repository):
         package={},
         location={},
         raw={},
-        created_at="2024-06-01T00:00:00Z"
+        created_at="2024-06-01T00:00:00Z",
     )
-    
-    result = alert_repository.upsert_alert(alert)
-    
-    assert result is not None, "upsert_alert debe retornar un resultado"
-    assert len(result) > 0, "upsert_alert debe retornar al menos un registro"
-    assert result[0]['id'] == "test-alert-123", f"ID esperado: test-alert-123, obtenido: {result[0].get('id')}"
-    
+
+    result = alert_repository.upsert(alert)
+
+    assert result is not None, "upsert debe retornar un resultado"
+    assert (
+        result.id == "test-alert-123"
+    ), f"ID esperado: test-alert-123, obtenido: {result.id}"
+
     # Cleanup
-    alert_repository.supabase.table("alerts").delete().eq('id', result[0]['id']).execute()
+    alert_repository.supabase.table("alerts").delete().eq("id", result.id).execute()
 
 
 @pytest.mark.repository
@@ -53,25 +55,30 @@ def test_get_alert_by_id(alert_repository):
         package={},
         location={},
         raw={},
-        created_at="2024-06-01T00:00:00Z"
+        created_at="2024-06-01T00:00:00Z",
     )
-    insert_result = alert_repository.upsert_alert(alert)
-    alert_id = insert_result[0]['id']
-    
+    alert_repository.upsert(alert)
+
     # Test
-    result = alert_repository.get_alert_by_id(alert_id)
-    
-    assert result is not None, "get_alert_by_id debe retornar un resultado"
-    assert result['id'] == alert_id, f"ID esperado: {alert_id}, obtenido: {result.get('id')}"
-    assert result['cve'] == "TEST-GET-001", f"CVE esperado: TEST-GET-001, obtenido: {result.get('cve')}"
-    
+    result = alert_repository.get_by_id("test-get-123")
+
+    assert result is not None, "get_by_id debe retornar un resultado"
+    assert (
+        result.id == "test-get-123"
+    ), f"ID esperado: test-get-123, obtenido: {result.id}"
+    assert (
+        result.cve == "TEST-GET-001"
+    ), f"CVE esperado: TEST-GET-001, obtenido: {result.cve}"
+
     # Cleanup
-    alert_repository.supabase.table("alerts").delete().eq('id', alert_id).execute()
+    alert_repository.supabase.table("alerts").delete().eq(
+        "id", "test-get-123"
+    ).execute()
 
 
 @pytest.mark.repository
 def test_upsert_update_alert(alert_repository):
-    """Actualiza un alert existente."""
+    """Actualiza un alert existente usando upsert."""
     # Setup
     alert = AlertModel(
         id="test-update-123",
@@ -84,28 +91,23 @@ def test_upsert_update_alert(alert_repository):
         package={},
         location={},
         raw={},
-        created_at="2024-06-01T00:00:00Z"
+        created_at="2024-06-01T00:00:00Z",
     )
-    alert_repository.upsert_alert(alert)
-    
+    alert_repository.upsert(alert)
+
     # Test
-    alert_updated = AlertModel(
-        id="test-update-123",
-        repo="updated-repo",
-        source="dependabot",
-        severity=5.0,
-        cvss=5.0,
-        cve="TEST-UPDATE-001",
-        description="Updated",
-        package={},
-        location={},
-        raw={},
-        created_at="2024-06-01T00:00:00Z"
-    )
-    result = alert_repository.upsert_alert(alert_updated)
-    
-    assert result[0]['description'] == "Updated", f"Descripción esperada: 'Updated', obtenida: '{result[0].get('description')}'"
-    assert result[0]['repo'] == "updated-repo", f"Repo esperado: 'updated-repo', obtenido: '{result[0].get('repo')}'"
-    
+    alert.description = "Updated"
+    alert.repo = "updated-repo"
+    result = alert_repository.upsert(alert)
+
+    assert (
+        result.description == "Updated"
+    ), f"Descripción esperada: 'Updated', obtenida: '{result.description}'"
+    assert (
+        result.repo == "updated-repo"
+    ), f"Repo esperado: 'updated-repo', obtenido: '{result.repo}'"
+
     # Cleanup
-    alert_repository.supabase.table("alerts").delete().eq('id', "test-update-123").execute()
+    alert_repository.supabase.table("alerts").delete().eq(
+        "id", "test-update-123"
+    ).execute()

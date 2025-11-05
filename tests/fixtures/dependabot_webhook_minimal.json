@@ -1,0 +1,31 @@
+{
+    "action": "created",
+    "alert": {
+        "number": 11,
+        "state": "open",
+        "dependency": {
+            "package": {
+                "ecosystem": "npm",
+                "name": "axios"
+            },
+            "manifest_path": "frontend/package-lock.json",
+            "scope": "runtime",
+            "relationship": "direct"
+        },
+        "security_advisory": {
+            "ghsa_id": "GHSA-4hjh-wcwx-xvwj",
+            "cve_id": "CVE-2025-58754",
+            "summary": "Axios is vulnerable to DoS attack",
+            "severity": "high",
+            "cvss": {
+                "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                "score": 7.5
+            }
+        },
+        "created_at": "2025-11-05T21:53:24Z"
+    },
+    "repository": {
+        "id": 988429046,
+        "full_name": "PangoAguirre/meeting-doc-generator"
+    }
+}
