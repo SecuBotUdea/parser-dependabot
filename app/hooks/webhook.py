@@ -9,8 +9,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Request
 
-from .db import upsert_alert
-from .mapper import map_dependabot_payload
+from app.services.alert_service import create_alert_from_dependabot
 
 # Load env
 load_dotenv()
@@ -96,7 +95,7 @@ async def _enqueue_upsert(alert_obj: dict) -> None:
     """
     try:
         # asyncio.to_thread ejecuta la función bloqueante en un hilo del pool del interprete
-        await asyncio.to_thread(upsert_alert, alert_obj)
+        await asyncio.to_thread(create_alert_from_dependabot, alert_obj)
         logger.info("upsert_alert completed for id=%s", alert_obj.get("id"))
     except Exception as e:
         logger.exception(
@@ -173,20 +172,10 @@ async def webhook(request: Request):
 
     # map payload
     try:
-        normalized = map_dependabot_payload(payload)
+        normalized = create_alert_from_dependabot(payload)
     except Exception as e:
         logger.exception("Error mapping payload (delivery=%s): %s", delivery, e)
         raise HTTPException(status_code=400, detail="Invalid payload format")
-
-    # schedule the DB upsert without blocking
-    try:
-        # create_task sobre la coroutine que usa asyncio.to_thread
-        asyncio.create_task(_enqueue_upsert(normalized))
-    except Exception as e:
-        logger.exception("Error scheduling upsert task (delivery=%s): %s", delivery, e)
-        raise HTTPException(
-            status_code=500, detail="Internal error scheduling background work"
-        )
-
+    
     logger.info("Accepted alert (delivery=%s id=%s)", delivery, normalized.get("id"))
     return {"status": "accepted"}
