@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.hooks import webhook
+from app.routes import webhook
 from app.main import app
 
 
