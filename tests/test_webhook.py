@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+import app.routes.webhook as webhook
 from app.main import app
-from app.routes.webhook import webhook
 
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ def test_webhook_ping_event(monkeypatch):
     assert response.json() == {"status": "pong"}
 
 
-@patch("app.hooks.webhook._enqueue_upsert", new_callable=AsyncMock)
+@patch("app.routes.webhook._enqueue_upsert", new_callable=AsyncMock)
 def test_webhook_valid_event(mock_enqueue):
     """Debe aceptar y encolar el evento si la firma es válida."""
     client = TestClient(app)
