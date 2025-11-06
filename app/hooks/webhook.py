@@ -1,4 +1,3 @@
-# secubot/webhook.py
 import asyncio
 import hashlib
 import hmac
@@ -7,9 +6,12 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 
-from app.services.alert_service import create_alert_from_dependabot
+# Importar servicio y repositorio
+from app.services.alert_service import AlertService
+from app.repositories.alert_repo import AlertRepository
+from app.core.config import get_supabase
 
 # Load env
 load_dotenv()
@@ -24,6 +26,10 @@ logger = logging.getLogger("webhook")
 
 DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
+
+# --------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------
 
 def _to_bytes(x: Optional[bytes | str]) -> bytes:
     if x is None:
@@ -87,31 +93,40 @@ def verify_signature(
         logger.exception("verify_signature: unexpected error: %s", exc)
         return False
 
+# Crear una única instancia del repositorio y servicio
+def get_alert_service() -> AlertService:
+    supabase = get_supabase()
+    repo = AlertRepository(supabase)
+    return AlertService(repo)
 
-async def _enqueue_upsert(alert_obj: dict) -> None:
+
+async def _enqueue_upsert(alert_data: dict, service: AlertService) -> None:
     """
-    Ejecuta upsert_alert en un hilo separado para evitar bloquear el event loop.
-    También captura excepciones y las loggea.
+    Ejecuta la creación o actualización de alertas usando AlertService
+    en un hilo separado, evitando bloquear el event loop.
     """
     try:
-        # asyncio.to_thread ejecuta la función bloqueante en un hilo del pool del interprete
-        await asyncio.to_thread(create_alert_from_dependabot, alert_obj)
-        logger.info("upsert_alert completed for id=%s", alert_obj.get("id"))
+        await asyncio.to_thread(service.create_alert_from_dependabot, alert_data)
+        logger.info("AlertService upsert completed for id=%s", alert_data.get("id"))
     except Exception as e:
         logger.exception(
-            "Error executing upsert_alert in background for id=%s: %s",
-            alert_obj.get("id"),
+            "Error executing AlertService in background for id=%s: %s",
+            alert_data.get("id"),
             e,
         )
 
 
+# --------------------------------------------------------------------
+# Webhook principal
+# --------------------------------------------------------------------
+
 @router.post("/webhook")
-async def webhook(request: Request):
+async def webhook(request: Request, alert_service: AlertService = Depends(get_alert_service)):
     """
     Endpoint GitHub App webhooks (Dependabot, …)
     - Verifica X-Hub-Signature-256
     - Responde rápido a ping
-    - Normaliza payload y dispara upsert_alert en background sin bloquear el loop
+    - Normaliza payload y dispara AlertService en background
     """
     if not DEBUG and not WEBHOOK_SECRET:
         logger.error("WEBHOOK_SECRET not configured (and DEBUG is false).")
@@ -136,25 +151,6 @@ async def webhook(request: Request):
 
     if not verify_signature(body, sig):
         logger.warning("Invalid signature for delivery %s (event=%s)", delivery, event)
-        if DEBUG:
-            try:
-                secret_sample = (
-                    (os.getenv("WEBHOOK_SECRET") or "")[:8] + "..."
-                    if os.getenv("WEBHOOK_SECRET")
-                    else "<empty>"
-                )
-                hmac.new(
-                    (os.getenv("WEBHOOK_SECRET") or "").encode(),
-                    msg=body,
-                    digestmod=hashlib.sha256,
-                )
-                logger.debug(
-                    "DEBUG signature received=%s expected=sha256=... secret_sample=%s",
-                    sig,
-                    secret_sample,
-                )
-            except Exception:
-                logger.debug("DEBUG: could not recompute expected signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     try:
@@ -163,19 +159,18 @@ async def webhook(request: Request):
         logger.exception("Invalid JSON body for delivery %s: %s", delivery, e)
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # ping handling
+    # Ping event
     if event == "ping" or (
         isinstance(payload, dict) and (payload.get("zen") or payload.get("hook_id"))
     ):
         logger.info("Ping received (delivery=%s). Responding pong.", delivery)
         return {"status": "pong"}
 
-    # map payload
     try:
-        normalized = create_alert_from_dependabot(payload)
+        asyncio.create_task(_enqueue_upsert(payload, alert_service))
     except Exception as e:
-        logger.exception("Error mapping payload (delivery=%s): %s", delivery, e)
-        raise HTTPException(status_code=400, detail="Invalid payload format")
-    
-    logger.info("Accepted alert (delivery=%s id=%s)", delivery, normalized.get("id"))
+        logger.exception("Error scheduling AlertService task (delivery=%s): %s", delivery, e)
+        raise HTTPException(status_code=500, detail="Error scheduling background task")
+
+    logger.info("Accepted alert (delivery=%s)", delivery)
     return {"status": "accepted"}
