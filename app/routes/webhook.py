@@ -8,8 +8,8 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.services.alert_service import AlertService
 from app.routes.items.get_alert_service import get_alert_service
+from app.services.alert_service import AlertService
 
 # Load env
 load_dotenv()
