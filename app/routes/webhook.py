@@ -8,9 +8,8 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.core.config import get_supabase
-from app.repositories.alert_repo import AlertRepository
 from app.services.alert_service import AlertService
+from app.routes.items.get_alert_service import get_alert_service
 
 # Load env
 load_dotenv()
@@ -92,13 +91,6 @@ def verify_signature(
     except Exception as exc:
         logger.exception("verify_signature: unexpected error: %s", exc)
         return False
-
-
-# Crear una única instancia del repositorio y servicio
-def get_alert_service() -> AlertService:
-    supabase = get_supabase()
-    repo = AlertRepository(supabase)
-    return AlertService(repo)
 
 
 async def _enqueue_upsert(alert_data: dict, service: AlertService) -> None:
