@@ -6,12 +6,11 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-# Importar servicio y repositorio
-from app.services.alert_service import AlertService
-from app.repositories.alert_repo import AlertRepository
 from app.core.config import get_supabase
+from app.repositories.alert_repo import AlertRepository
+from app.services.alert_service import AlertService
 
 # Load env
 load_dotenv()
@@ -30,6 +29,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 # --------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------
+
 
 def _to_bytes(x: Optional[bytes | str]) -> bytes:
     if x is None:
@@ -93,6 +93,7 @@ def verify_signature(
         logger.exception("verify_signature: unexpected error: %s", exc)
         return False
 
+
 # Crear una única instancia del repositorio y servicio
 def get_alert_service() -> AlertService:
     supabase = get_supabase()
@@ -120,8 +121,11 @@ async def _enqueue_upsert(alert_data: dict, service: AlertService) -> None:
 # Webhook principal
 # --------------------------------------------------------------------
 
+
 @router.post("/webhook")
-async def webhook(request: Request, alert_service: AlertService = Depends(get_alert_service)):
+async def webhook(
+    request: Request, alert_service: AlertService = Depends(get_alert_service)
+):
     """
     Endpoint GitHub App webhooks (Dependabot, …)
     - Verifica X-Hub-Signature-256
@@ -169,7 +173,9 @@ async def webhook(request: Request, alert_service: AlertService = Depends(get_al
     try:
         asyncio.create_task(_enqueue_upsert(payload, alert_service))
     except Exception as e:
-        logger.exception("Error scheduling AlertService task (delivery=%s): %s", delivery, e)
+        logger.exception(
+            "Error scheduling AlertService task (delivery=%s): %s", delivery, e
+        )
         raise HTTPException(status_code=500, detail="Error scheduling background task")
 
     logger.info("Accepted alert (delivery=%s)", delivery)

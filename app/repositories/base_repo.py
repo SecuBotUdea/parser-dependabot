@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar, Optional, Any
+from typing import Any, Generic, Optional, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class BaseRepository(ABC, Generic[T]):
@@ -9,6 +9,7 @@ class BaseRepository(ABC, Generic[T]):
     def get_by_id(self, entity_id: Any) -> Optional[T]:
         """Obtiene una entidad por su ID."""
         pass
+
     @abstractmethod
     def upsert(self, entity: T) -> T:
         """Inserta o actualiza una entidad."""

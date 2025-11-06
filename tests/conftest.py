@@ -1,6 +1,7 @@
-import pytest
 import json
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture
@@ -12,10 +13,12 @@ def fixtures_dir():
 @pytest.fixture
 def load_fixture(fixtures_dir):
     """Factory fixture para cargar archivos JSON."""
+
     def _load(filename: str):
         filepath = fixtures_dir / filename
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
+
     return _load
 
 
