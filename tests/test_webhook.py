@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.routes import webhook
 from app.main import app
+from app.routes import webhook
 
 
 @pytest.fixture(autouse=True)
