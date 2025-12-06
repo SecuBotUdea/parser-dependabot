@@ -1,0 +1,52 @@
+name: SecuBot Trivy SAST
+
+on:
+  push:
+    branches: [main, dev, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read  # Add this
+  id-token: write  # Add this (needed for some GitHub-hosted runners)
+
+env:
+  TRIVY_SEVERITY: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+  ARTIFACT_RETENTION_DAYS: 30
+
+jobs:
+  trivy-sast-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Trivy vulnerability scanner (JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy_report.json'
+          severity: ${{ env.TRIVY_SEVERITY }}
+          scanners: 'vuln,secret,config'
+          exit-code: '0'
+      - name: Upload Trivy results as artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-scan-results
+          path: trivy_report.json
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
