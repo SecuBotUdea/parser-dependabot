@@ -36,8 +36,9 @@ jobs:
       continue-on-error: true
       with:
         target: 'https://nextjs-boilerplate-mu-lilac-67.vercel.app/'
-        cmd_options: '-a -J report_json.json'
+        cmd_options: '-a'
         token: ${{ secrets.GITHUB_TOKEN }}
+        create_issue: false
 
     - name: Upload JSON Report
       uses: actions/upload-artifact@v4
