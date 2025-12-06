@@ -26,7 +26,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          repository: 'PangoAguirre/connect-four'  # Cambia esto
+          repository: 'juice-shop/juice-shop'  # Cambia esto
           token: ${{ secrets.GITHUB_TOKEN }}
           path: 'target-repo'
 
