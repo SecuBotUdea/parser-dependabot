@@ -24,3 +24,8 @@ def test_create_and_get_alert(alert_service_real, complete_webhook):
     retrieved = alert_service_real.get_alert(created.alert_id)
     assert retrieved is not None
     assert retrieved.alert_id == created.alert_id
+
+    # Cleanup
+    alert_service_real.alert_repository.supabase.table("alert").delete().eq(
+        "alert_id", created.alert_id
+    ).execute()

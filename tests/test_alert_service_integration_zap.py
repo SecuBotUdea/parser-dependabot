@@ -87,6 +87,12 @@ def test_create_alerts_from_zap(alert_service_real, complete_zap_report):
     assert created_alerts[0].severity == "high"  # 👈 riskcode "3" = "high"
     assert created_alerts[1].severity == "medium"  # 👈 riskcode "2" = "medium"
 
+    # Cleanup
+    for alert in created_alerts:
+        alert_service_real.alert_repository.supabase.table("alert").delete().eq(
+            "alert_id", alert.alert_id
+        ).execute()
+
 
 @pytest.mark.integration
 def test_upsert_zap_alert_updates_existing(alert_service_real):
@@ -154,3 +160,8 @@ def test_upsert_zap_alert_updates_existing(alert_service_real):
     assert "Updated description" in updated_alert.normalized_payload.get(
         "description", ""
     )
+
+    # Cleanup
+    alert_service_real.alert_repository.supabase.table("alert").delete().eq(
+        "alert_id", first_alert_id
+    ).execute()
