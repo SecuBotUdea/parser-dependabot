@@ -3,6 +3,7 @@ from typing import Optional
 from app.models.alert_model import Alert as AlertModel
 from app.repositories.base_repo import BaseRepository
 from app.services.mappers.dependabot_mapper import DependabotMapper
+from app.services.mappers.trivy_mapper import TrivyMapper
 from app.services.mappers.zap_mapper import ZapMapper
 
 
@@ -15,6 +16,7 @@ class AlertService:
         self.alert_repository = alert_repository
         self.dependabot_mapper = DependabotMapper()
         self.zap_mapper = ZapMapper()
+        self.trivy_mapper = TrivyMapper()
 
     def create_alert_from_dependabot(self, webhook_data: dict) -> AlertModel:
         """
@@ -44,6 +46,27 @@ class AlertService:
         """
         # Mapear datos (ZAP puede generar múltiples alertas)
         alerts = self.zap_mapper.map_to_alerts(zap_data)
+
+        # Persistir cada alerta
+        created_alerts = []
+        for alert in alerts:
+            created_alert = self.alert_repository.upsert(alert)
+            created_alerts.append(created_alert)
+
+        return created_alerts
+
+    def create_alert_from_trivy(self, trivy_data: dict) -> list[AlertModel]:
+        """
+        Procesa un reporte de Trivy SAST y crea/actualiza múltiples alerts.
+
+        Args:
+            trivy_data: Datos completos del reporte JSON de Trivy
+
+        Returns:
+            list[AlertModel]: Lista de alerts creados/actualizados
+        """
+        # Mapear datos (Trivy puede generar múltiples alertas)
+        alerts = self.trivy_mapper.map_to_alerts(trivy_data)
 
         # Persistir cada alerta
         created_alerts = []

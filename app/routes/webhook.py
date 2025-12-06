@@ -109,6 +109,9 @@ async def _enqueue_upsert(
         elif source == "owasp_zap":
             await asyncio.to_thread(service.create_alert_from_zap, alert_data)
             logger.info("OWASP ZAP alert upsert completed")
+        elif source == "trivy_sast":
+            await asyncio.to_thread(service.create_alert_from_trivy, alert_data)
+            logger.info("Trivy SAST alerts upsert completed")
         else:
             logger.warning("Unknown source: %s", source)
             return
@@ -176,9 +179,14 @@ async def webhook(
     source = "dependabot"  # Default
 
     if isinstance(payload, dict):
-        # Si viene con campo "source" explícito (como OWASP ZAP)
-        if payload.get("source") == "owasp_zap":
+        # Si viene con campo "source" explícito
+        payload_source = payload.get("source", "")
+
+        if payload_source == "owasp_zap":
             source = "owasp_zap"
+            payload = payload.get("payload", payload)  # Extraer el payload interno
+        elif payload_source == "trivy_sast":
+            source = "trivy_sast"
             payload = payload.get("payload", payload)  # Extraer el payload interno
         # Si es un evento de GitHub (Dependabot)
         elif event:
