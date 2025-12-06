@@ -3,6 +3,7 @@ from typing import Optional
 from app.models.alert_model import AlertModel
 from app.repositories.base_repo import BaseRepository
 from app.services.mappers.dependabot_mapper import DependabotMapper
+from app.services.mappers.zap_mapper import ZapMapper
 
 
 class AlertService:
@@ -12,7 +13,8 @@ class AlertService:
 
     def __init__(self, alert_repository: BaseRepository[AlertModel]):
         self.alert_repository = alert_repository
-        self.mapper = DependabotMapper()
+        self.dependabot_mapper = DependabotMapper()
+        self.zap_mapper = ZapMapper()
 
     def create_alert_from_dependabot(self, webhook_data: dict) -> AlertModel:
         """
@@ -25,10 +27,31 @@ class AlertService:
             AlertModel: Alert creado/actualizado
         """
         # Mapear datos
-        alert = self.mapper.map_to_alert(webhook_data)
+        alert = self.dependabot_mapper.map_to_alert(webhook_data)
 
         # Persistir
         return self.alert_repository.upsert(alert)
+
+    def create_alert_from_zap(self, zap_data: dict) -> list[AlertModel]:
+        """
+        Procesa un reporte de OWASP ZAP y crea/actualiza múltiples alerts.
+
+        Args:
+            zap_data: Datos completos del reporte JSON de OWASP ZAP
+
+        Returns:
+            list[AlertModel]: Lista de alerts creados/actualizados
+        """
+        # Mapear datos (ZAP puede generar múltiples alertas)
+        alerts = self.zap_mapper.map_to_alerts(zap_data)
+
+        # Persistir cada alerta
+        created_alerts = []
+        for alert in alerts:
+            created_alert = self.alert_repository.upsert(alert)
+            created_alerts.append(created_alert)
+
+        return created_alerts
 
     def get_alert(self, alert_id: str) -> Optional[AlertModel]:
         """

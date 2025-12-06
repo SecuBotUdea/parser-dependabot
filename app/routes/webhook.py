@@ -93,14 +93,25 @@ def verify_signature(
         return False
 
 
-async def _enqueue_upsert(alert_data: dict, service: AlertService) -> None:
+async def _enqueue_upsert(
+    alert_data: dict, service: AlertService, source: str = "dependabot"
+) -> None:
     """
     Ejecuta la creación o actualización de alertas usando AlertService
     en un hilo separado, evitando bloquear el event loop.
     """
     try:
-        await asyncio.to_thread(service.create_alert_from_dependabot, alert_data)
-        logger.info("AlertService upsert completed for id=%s", alert_data.get("id"))
+        if source == "dependabot":
+            await asyncio.to_thread(service.create_alert_from_dependabot, alert_data)
+            logger.info(
+                "Dependabot alert upsert completed for id=%s", alert_data.get("id")
+            )
+        elif source == "owasp_zap":
+            await asyncio.to_thread(service.create_alert_from_zap, alert_data)
+            logger.info("OWASP ZAP alert upsert completed")
+        else:
+            logger.warning("Unknown source: %s", source)
+            return
     except Exception as e:
         logger.exception(
             "Error executing AlertService in background for id=%s: %s",
@@ -162,8 +173,21 @@ async def webhook(
         logger.info("Ping received (delivery=%s). Responding pong.", delivery)
         return {"status": "pong"}
 
+    source = "dependabot"  # Default
+
+    if isinstance(payload, dict):
+        # Si viene con campo "source" explícito (como OWASP ZAP)
+        if payload.get("source") == "owasp_zap":
+            source = "owasp_zap"
+            payload = payload.get("payload", payload)  # Extraer el payload interno
+        # Si es un evento de GitHub (Dependabot)
+        elif event:
+            source = "dependabot"
+
+    logger.info("Processing alert from source: %s", source)
+
     try:
-        asyncio.create_task(_enqueue_upsert(payload, alert_service))
+        asyncio.create_task(_enqueue_upsert(payload, alert_service, source=source))
     except Exception as e:
         logger.exception(
             "Error scheduling AlertService task (delivery=%s): %s", delivery, e

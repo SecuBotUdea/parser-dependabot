@@ -45,3 +45,38 @@ jobs:
         name: zap-json-report
         path: report_json.json
         retention-days: 30
+
+    - name: Send ZAP results to webhook
+      if: always()
+      run: |
+        if [ ! -f report_json.json ]; then
+          echo "report_json.json not found, skipping webhook"
+          exit 0
+        fi
+
+        # Crear payload completo
+        PAYLOAD=$(jq -n \
+          --arg source "owasp_zap" \
+          --arg scan_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg repository "${{ github.repository }}" \
+          --arg run_id "${{ github.run_id }}" \
+          --argjson zap_data "$(cat report_json.json)" \
+          '{
+            source: $source,
+            scan_date: $scan_date,
+            repository: $repository,
+            run_id: $run_id,
+            payload: $zap_data
+          }')
+
+        # Calcular firma HMAC (usando el mismo WEBHOOK_SECRET que tienes en Vercel)
+        SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "19f007ae970455d603a8734ec572d19a4b013169" | sed 's/^.* //')
+
+        # Enviar al webhook de Vercel
+        curl -X POST "https://parser-dependabot.vercel.app/webhook" \
+          -H "Content-Type: application/json" \
+          -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
+          -d "$PAYLOAD" \
+          --fail-with-body \
+          -v
+      continue-on-error: true
