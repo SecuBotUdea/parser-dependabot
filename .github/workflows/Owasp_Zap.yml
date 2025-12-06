@@ -46,6 +46,18 @@ jobs:
         path: report_json.json
         retention-days: 30
 
+    - name: Debug - Show ZAP Report
+      if: always()
+      run: |
+        echo "=== Checking if report exists ==="
+        ls -la report_json.json || echo "report_json.json NOT FOUND"
+
+        echo "=== First 100 lines of report ==="
+        head -n 100 report_json.json || echo "Cannot read file"
+
+        echo "=== File size ==="
+        wc -c report_json.json || echo "Cannot get size"
+
     - name: Send ZAP results to webhook
       if: always()
       run: |
