@@ -2,7 +2,7 @@ from typing import Optional
 
 from supabase import Client
 
-from app.models.alert_model import AlertModel
+from app.models.alert_model import Alert as AlertModel
 from app.repositories.base_repo import BaseRepository
 
 

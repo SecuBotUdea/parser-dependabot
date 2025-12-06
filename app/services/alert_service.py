@@ -1,6 +1,6 @@
 from typing import Optional
 
-from app.models.alert_model import AlertModel
+from app.models.alert_model import Alert as AlertModel
 from app.repositories.base_repo import BaseRepository
 from app.services.mappers.dependabot_mapper import DependabotMapper
 from app.services.mappers.zap_mapper import ZapMapper

@@ -1,33 +1,42 @@
+import hashlib
 from datetime import datetime
 from typing import Any, Dict, List
 
-from app.models.alert_model import AlertModel
+from app.models.alert_model import Alert
 
 
 class ZapMapper:
     """
-    Mapper para transformar datos del reporte JSON de OWASP ZAP al modelo AlertModel.
+    Mapper para transformar datos del reporte JSON de OWASP ZAP al modelo Alert.
     """
 
-    # Mapeo de riskcode de ZAP a severidad numérica (similar a CVSS)
+    # Mapeo de riskcode de ZAP a severidad normalizada
     RISK_MAP = {
-        "0": 1.0,  # Informational
-        "1": 3.0,  # Low
-        "2": 5.0,  # Medium
-        "3": 7.5,  # High
-        "4": 9.0,  # Critical (no está en el estándar ZAP pero por si acaso)
+        "0": "informational",
+        "1": "low",
+        "2": "medium",
+        "3": "high",
+    }
+
+    # Mapeo de confidence de ZAP
+    CONFIDENCE_MAP = {
+        "0": "false_positive",
+        "1": "low",
+        "2": "medium",
+        "3": "high",
+        "4": "confirmed",
     }
 
     @staticmethod
-    def map_to_alerts(zap_report: Dict[str, Any]) -> List[AlertModel]:
+    def map_to_alerts(zap_report: Dict[str, Any]) -> List[Alert]:
         """
-        Mapea el reporte completo de OWASP ZAP a múltiples AlertModel.
+        Mapea el reporte completo de OWASP ZAP a múltiples Alert.
 
         Args:
             zap_report: Datos completos del reporte JSON de OWASP ZAP
 
         Returns:
-            Lista de AlertModel con los datos mapeados
+            Lista de Alert con los datos mapeados
         """
         alerts = []
         sites = zap_report.get("site", [])
@@ -42,7 +51,7 @@ class ZapMapper:
 
             for alert_data in site_alerts:
                 alert = ZapMapper._map_single_alert(
-                    alert_data, site_url, scan_date, zap_version, zap_report
+                    alert_data, site_url, scan_date, zap_version
                 )
                 alerts.append(alert)
 
@@ -54,146 +63,191 @@ class ZapMapper:
         site_url: str,
         scan_date: str,
         zap_version: str,
-        full_report: Dict[str, Any],
-    ) -> AlertModel:
+    ) -> Alert:
         """
-        Mapea una alerta individual de ZAP al modelo AlertModel.
+        Mapea una alerta individual de ZAP al modelo Alert.
         """
         plugin_id = alert_data.get("pluginid", "unknown")
         alert_name = alert_data.get("alert", "Unknown Alert")
+        riskcode = str(alert_data.get("riskcode", "2"))
+        confidence = str(alert_data.get("confidence", "2"))
 
-        # Generar ID único
-        alert_id = ZapMapper._generate_alert_id(site_url, plugin_id, alert_name)
+        # Generar signature única
+        signature = ZapMapper._generate_signature(site_url, plugin_id, alert_name)
 
-        return AlertModel(
-            id=alert_id,
-            repo=ZapMapper._extract_repo_from_url(site_url),
-            source="owasp_zap",
-            severity=ZapMapper._extract_severity(alert_data),
-            cvss=ZapMapper._extract_severity(
-                alert_data
-            ),  # ZAP no usa CVSS directamente
-            cve=ZapMapper._extract_cve_info(alert_data),
-            description=ZapMapper._extract_description(alert_data),
-            package=ZapMapper._extract_package_info(alert_data),
-            location=ZapMapper._extract_location_info(alert_data, site_url),
-            raw={
-                "alert": alert_data,
-                "site_url": site_url,
-                "scan_metadata": {
-                    "generated": scan_date,
-                    "zap_version": zap_version,
-                },
-            },
-            created_at=scan_date,
+        # Extraer severidad normalizada
+        severity = ZapMapper.RISK_MAP.get(riskcode, "medium")
+
+        # Determinar quality basado en confidence
+        quality = ZapMapper._determine_quality(confidence)
+
+        # Generar normalized_payload
+        normalized_payload = {
+            "plugin_id": plugin_id,
+            "alert_ref": alert_data.get("alertRef", ""),
+            "alert_name": alert_name,
+            "riskcode": riskcode,
+            "confidence": confidence,
+            "confidence_level": ZapMapper.CONFIDENCE_MAP.get(confidence, "medium"),
+            "description": ZapMapper._clean_html(alert_data.get("desc", "")),
+            "solution": ZapMapper._clean_html(alert_data.get("solution", "")),
+            "other_info": ZapMapper._clean_html(alert_data.get("otherinfo", "")),
+            "reference": ZapMapper._clean_html(alert_data.get("reference", "")),
+            "cwe_id": alert_data.get("cweid", ""),
+            "wasc_id": alert_data.get("wascid", ""),
+            "instances": ZapMapper._extract_instances(alert_data.get("instances", [])),
+            "instance_count": int(alert_data.get("count", "0")),
+            "site_url": site_url,
+            "zap_version": zap_version,
+        }
+
+        # Crear lifecycle history entry inicial
+        lifecycle_history = [
+            {
+                "timestamp": scan_date,
+                "status": "open",
+                "action": "detected",
+                "actor": "owasp_zap",
+            }
+        ]
+
+        # Generar alert_id único
+        alert_id = ZapMapper._generate_alert_id(site_url, plugin_id)
+
+        return Alert(
+            alert_id=alert_id,
+            signature=signature,
+            source_id="zap",
+            severity=severity,
+            component=ZapMapper._extract_component(site_url, alert_data),
+            status="open",
+            first_seen=ZapMapper._parse_datetime(scan_date),
+            last_seen=ZapMapper._parse_datetime(scan_date),
+            quality=quality,
+            normalized_payload=normalized_payload,
+            lifecycle_history=lifecycle_history,
+            reopen_count=0,
+            last_reopened_at=None,
+            version=1,
         )
 
     @staticmethod
-    def _extract_severity(alert_data: Dict[str, Any]) -> float:
+    def _generate_signature(site_url: str, plugin_id: str, alert_name: str) -> str:
         """
-        Extrae la severidad numérica del riskcode de ZAP.
+        Genera una firma única para identificar la alerta.
+        Basada en: site_url + plugin_id + alert_name
         """
-        riskcode = str(alert_data.get("riskcode", "2"))
-        return ZapMapper.RISK_MAP.get(riskcode, 5.0)
+        domain = ZapMapper._extract_domain(site_url)
+        signature_string = f"{domain}:{plugin_id}:{alert_name}"
+        return hashlib.sha256(signature_string.encode()).hexdigest()[:16]
 
     @staticmethod
-    def _extract_cve_info(alert_data: Dict[str, Any]) -> str:
+    def _determine_quality(confidence: str) -> str:
         """
-        Extrae información de CVE/CWE.
-        ZAP usa CWE ID principalmente.
+        Determina la calidad basada en el nivel de confianza de ZAP.
         """
-        cweid = alert_data.get("cweid", "")
-        plugin_id = alert_data.get("pluginid", "")
-
-        if cweid:
-            return f"CWE-{cweid}"
-
-        # Usar plugin ID como fallback
-        return f"ZAP-{plugin_id}"
-
-    @staticmethod
-    def _extract_description(alert_data: Dict[str, Any]) -> str:
-        """
-        Extrae la descripción completa de la vulnerabilidad.
-        """
-        desc = alert_data.get("desc", "")
-        solution = alert_data.get("solution", "")
-
-        # Limpiar tags HTML si existen
-        desc_clean = desc.replace("<p>", "").replace("</p>", "")
-        solution_clean = solution.replace("<p>", "").replace("</p>", "")
-
-        full_description = desc_clean
-        if solution_clean:
-            full_description += f"\n\nSolution: {solution_clean}"
-
-        return full_description
-
-    @staticmethod
-    def _extract_package_info(alert_data: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Extrae información del 'paquete' afectado.
-        Para ZAP, esto es más bien el tipo de vulnerabilidad.
-        """
-        return {
-            "name": alert_data.get("alert", "unknown"),
-            "ecosystem": "web-application",
-            "plugin_id": alert_data.get("pluginid", ""),
-            "alert_ref": alert_data.get("alertRef", ""),
+        confidence_map = {
+            "0": "low",  # False Positive
+            "1": "low",  # Low confidence
+            "2": "medium",  # Medium confidence
+            "3": "high",  # High confidence
+            "4": "high",  # Confirmed
         }
+        return confidence_map.get(confidence, "medium")
 
     @staticmethod
-    def _extract_location_info(
-        alert_data: Dict[str, Any], site_url: str
-    ) -> Dict[str, Any]:
+    def _extract_component(site_url: str, alert_data: Dict[str, Any]) -> str:
         """
-        Extrae información de ubicación de las instancias de la vulnerabilidad.
+        Extrae el componente afectado.
+        Para ZAP, usamos el dominio + tipo de vulnerabilidad.
         """
-        instances = alert_data.get("instances", [])
-        count = alert_data.get("count", "0")
-
-        # Extraer URIs únicos
-        uris = []
-        methods = []
-        for instance in instances:
-            uri = instance.get("uri", "")
-            method = instance.get("method", "")
-            if uri:
-                uris.append(uri)
-            if method:
-                methods.append(method)
-
-        return {
-            "site": site_url,
-            "affected_uris": uris,
-            "http_methods": list(set(methods)),
-            "instance_count": count,
-            "confidence": alert_data.get("confidence", ""),
-            "wascid": alert_data.get("wascid", ""),
-        }
+        domain = ZapMapper._extract_domain(site_url)
+        alert_name = alert_data.get("alert", "unknown")
+        return f"{domain}/{alert_name}"
 
     @staticmethod
-    def _extract_repo_from_url(site_url: str) -> str:
+    def _extract_instances(instances: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """
-        Extrae un nombre de 'repositorio' del URL escaneado.
-        Para aplicaciones web, usamos el dominio.
+        Extrae y normaliza las instancias de la vulnerabilidad.
+        """
+        normalized_instances = []
+
+        for instance in instances[:10]:  # Limitar a 10 instancias
+            normalized_instances.append(
+                {
+                    "uri": instance.get("uri", ""),
+                    "method": instance.get("method", ""),
+                    "param": instance.get("param", ""),
+                    "attack": instance.get("attack", ""),
+                    "evidence": instance.get("evidence", ""),
+                }
+            )
+
+        return normalized_instances
+
+    @staticmethod
+    def _extract_domain(site_url: str) -> str:
+        """
+        Extrae el dominio del URL escaneado.
         """
         try:
             # Remover protocolo
             clean_url = site_url.replace("https://", "").replace("http://", "")
-            # Tomar solo el dominio
+            # Tomar solo el dominio (antes del primer /)
             domain = clean_url.split("/")[0]
+            # Remover puerto si existe
+            domain = domain.split(":")[0]
             return domain
         except Exception:
             return "unknown"
 
     @staticmethod
-    def _generate_alert_id(site_url: str, plugin_id: str, alert_name: str) -> str:
+    def _clean_html(text: str) -> str:
+        """
+        Limpia tags HTML básicos del texto.
+        """
+        if not text:
+            return ""
+
+        # Remover tags HTML comunes
+        text = text.replace("<p>", "").replace("</p>", "\n")
+        text = text.replace("<br>", "\n").replace("<br/>", "\n")
+        text = text.replace("<strong>", "").replace("</strong>", "")
+        text = text.replace("<em>", "").replace("</em>", "")
+
+        return text.strip()
+
+    @staticmethod
+    def _generate_alert_id(site_url: str, plugin_id: str) -> str:
         """
         Genera un ID único para la alerta.
-        Formato: {domain}-zap-{plugin_id}
+        Formato: zap-{domain}-{plugin_id}
         """
-        domain = ZapMapper._extract_repo_from_url(site_url)
+        domain = ZapMapper._extract_domain(site_url)
         domain_safe = domain.replace(".", "-").replace(":", "-").lower()
 
-        return f"{domain_safe}-zap-{plugin_id}"
+        return f"zap-{domain_safe}-{plugin_id}"
+
+    @staticmethod
+    def _parse_datetime(dt_string: str) -> datetime:
+        """Parsea una fecha de ZAP a datetime."""
+        if not dt_string:
+            return datetime.utcnow()
+
+        try:
+            # ZAP usa formato: "Fri, 5 Dec 2025 22:10:29"
+            # O formato ISO: "2025-12-05T22:10:29"
+            if "T" in dt_string:
+                # Formato ISO
+                if dt_string.endswith("Z"):
+                    dt_string = dt_string[:-1] + "+00:00"
+                return datetime.fromisoformat(dt_string.split(".")[0])
+            else:
+                # Formato de ZAP con día de semana
+                # Remover el día de la semana si existe
+                parts = dt_string.split(", ")
+                if len(parts) > 1:
+                    dt_string = parts[1]
+                return datetime.strptime(dt_string, "%d %b %Y %H:%M:%S")
+        except (ValueError, AttributeError):
+            return datetime.utcnow()

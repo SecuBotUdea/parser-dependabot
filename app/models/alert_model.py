@@ -1,20 +1,25 @@
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class AlertModel(BaseModel):
-    id: str
-    repo: Optional[str]
-    source: Optional[str] = "dependabot"
-    severity: Optional[float] = None
-    cvss: Optional[float] = None
-    cve: Optional[str] = None
-    description: Optional[str] = None
-    package: Optional[Dict[str, Any]] = {}
-    location: Optional[Dict[str, Any]] = {}
-    raw: Optional[Dict[str, Any]] = {}
-    created_at: Optional[str] = None
+class Alert(BaseModel):
+    alert_id: str  # PK
+    signature: Optional[str] = None
+    source_id: Optional[str] = None
+    severity: Optional[str] = None
+    component: Optional[str] = None
+    status: Optional[str] = None
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    quality: Optional[str] = None
+    normalized_payload: Dict[str, Any] = Field(default_factory=dict)
+    lifecycle_history: List[Dict[str, Any]] = Field(default_factory=list)
+    reopen_count: Optional[int] = 0
+    last_reopened_at: Optional[datetime] = None
+    version: Optional[int] = 1
 
     class Config:
         extra = "allow"
+        orm_mode = True
