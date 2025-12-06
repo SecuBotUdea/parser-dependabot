@@ -11,11 +11,11 @@ class AlertRepository(BaseRepository[AlertModel]):
 
     def __init__(self, supabase: Client):
         self.supabase = supabase
-        self.table_name = "alerts"
+        self.table_name = "alert"
 
     def upsert(self, entity: AlertModel) -> AlertModel:
         """Inserta o actualiza un alert."""
-        data = entity.model_dump()
+        data = entity.model_dump(mode="json")
         response = self.supabase.table(self.table_name).upsert(data).execute()
         return AlertModel(**response.data[0])
 
@@ -25,7 +25,7 @@ class AlertRepository(BaseRepository[AlertModel]):
             response = (
                 self.supabase.table(self.table_name)
                 .select("*")
-                .eq("id", entity_id)
+                .eq("alert_id", entity_id)  # 👈 Cambiar de "id" a "alert_id"
                 .single()
                 .execute()
             )

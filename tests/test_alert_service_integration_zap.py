@@ -78,20 +78,14 @@ def test_create_alerts_from_zap(alert_service_real, complete_zap_report):
     created_alerts = alert_service_real.create_alert_from_zap(complete_zap_report)
 
     assert len(created_alerts) == 2
-    assert created_alerts[0].id is not None
-    assert created_alerts[1].id is not None
-    assert created_alerts[0].source == "owasp_zap"
-    assert created_alerts[1].source == "owasp_zap"
+    assert created_alerts[0].alert_id is not None
+    assert created_alerts[1].alert_id is not None
+    assert created_alerts[0].source_id == "zap"
+    assert created_alerts[1].source_id == "zap"
 
-    # Verificar severidades
-    assert created_alerts[0].severity == 7.5  # High
-    assert created_alerts[1].severity == 5.0  # Medium
-
-    # Cleanup
-    for alert in created_alerts:
-        alert_service_real.alert_repository.supabase.table("alerts").delete().eq(
-            "id", alert.id
-        ).execute()
+    # Verificar severidades (riskcode 3 = high, riskcode 2 = medium)
+    assert created_alerts[0].severity == "high"  # 👈 riskcode "3" = "high"
+    assert created_alerts[1].severity == "medium"  # 👈 riskcode "2" = "medium"
 
 
 @pytest.mark.integration
@@ -122,10 +116,12 @@ def test_upsert_zap_alert_updates_existing(alert_service_real):
     # Create inicial
     first_alerts = alert_service_real.create_alert_from_zap(initial_report)
     first_alert = first_alerts[0]
-    first_alert_id = first_alert.id
+    first_alert_id = first_alert.alert_id
 
-    assert first_alert.severity == 5.0
-    assert "Initial description" in first_alert.description
+    assert first_alert.severity == "medium"  # riskcode "2" = "medium"
+    assert "Initial description" in first_alert.normalized_payload.get(
+        "description", ""
+    )
 
     # Act: actualizar con misma alerta pero diferente severidad
     updated_report = {
@@ -153,11 +149,8 @@ def test_upsert_zap_alert_updates_existing(alert_service_real):
     updated_alert = updated_alerts[0]
 
     # Assert: mismo ID pero datos actualizados
-    assert updated_alert.id == first_alert_id
-    assert updated_alert.severity == 7.5  # Cambió de 5.0 a 7.5
-    assert "Updated description" in updated_alert.description
-
-    # Cleanup
-    alert_service_real.alert_repository.supabase.table("alerts").delete().eq(
-        "id", first_alert_id
-    ).execute()
+    assert updated_alert.alert_id == first_alert_id
+    assert updated_alert.severity == "high"  # Cambió de "medium" a "high"
+    assert "Updated description" in updated_alert.normalized_payload.get(
+        "description", ""
+    )
