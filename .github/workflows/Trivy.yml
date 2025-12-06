@@ -26,7 +26,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          repository: 'PangoAguirre/connect-four'  # Cambia esto
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: 'target-repo'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,7 +39,7 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
-          scan-ref: '.'
+          scan-ref: './target-repo'
           format: 'json'
           output: 'trivy_sast_report.json'
           severity: ${{ env.TRIVY_SEVERITY }}
