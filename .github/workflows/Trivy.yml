@@ -10,7 +10,7 @@ on:
       target_repo:
         description: 'Repository to scan (owner/repo)'
         required: true
-        default: 'juice-shop/juice-shop'
+        default: 'WebGoat/WebGoat'
 
 permissions:
   contents: read
