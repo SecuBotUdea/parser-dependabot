@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -18,6 +19,11 @@ router = APIRouter()
 
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 WEBHOOK_SECRET_BYTES = WEBHOOK_SECRET.encode() if WEBHOOK_SECRET else b""
+
+# URL destino para reenviar alertas normalizadas
+FORWARD_ALERTS_URL = os.getenv(
+    "FORWARD_ALERTS_URL", "https://secu-bot.vercel.app/api/v1/alerts"
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("webhook")
@@ -93,28 +99,92 @@ def verify_signature(
         return False
 
 
+async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
+    """
+    Envía la alerta normalizada (ya mapeada por AlertService) al endpoint POST externo
+
+    Args:
+        normalized_alert: Alerta ya normalizada por los mappers del AlertService
+        source: Origen de la alerta (dependabot, owasp_zap, trivy_sast, etc.)
+    """
+    try:
+        # Construir el formato requerido para el POST
+        alert_payload = {
+            "signature": normalized_alert.get("signature", ""),
+            "source_id": normalized_alert.get("source_id", ""),
+            "severity": normalized_alert.get("severity", "UNKNOWN"),
+            "component": normalized_alert.get("component", ""),
+            "quality": normalized_alert.get("quality", "good"),
+            "normalized_payload": normalized_alert.get("normalized_payload", {}),
+            "alert_id": normalized_alert.get("alert_id", ""),
+            "status": normalized_alert.get("status", "open"),
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                FORWARD_ALERTS_URL,
+                json=alert_payload,
+                headers={"Content-Type": "application/json", "X-Source": source},
+            )
+
+            if response.status_code in (200, 201, 202):
+                logger.info(
+                    "Successfully forwarded normalized alert to %s (alert_id=%s)",
+                    FORWARD_ALERTS_URL,
+                    alert_payload.get("alert_id"),
+                )
+            else:
+                logger.warning(
+                    "Forward alert returned status %s: %s",
+                    response.status_code,
+                    response.text,
+                )
+    except Exception as e:
+        logger.exception(
+            "Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e
+        )
+
+
 async def _enqueue_upsert(
     alert_data: dict, service: AlertService, source: str = "dependabot"
 ) -> None:
     """
     Ejecuta la creación o actualización de alertas usando AlertService
-    en un hilo separado, evitando bloquear el event loop.
+    en un hilo separado y luego envía la alerta normalizada al endpoint externo.
     """
     try:
+        normalized_alert = None
+
+        # Procesar con AlertService y obtener la alerta normalizada
         if source == "dependabot":
-            await asyncio.to_thread(service.create_alert_from_dependabot, alert_data)
+            normalized_alert = await asyncio.to_thread(
+                service.create_alert_from_dependabot, alert_data
+            )
             logger.info(
                 "Dependabot alert upsert completed for id=%s", alert_data.get("id")
             )
         elif source == "owasp_zap":
-            await asyncio.to_thread(service.create_alert_from_zap, alert_data)
+            normalized_alert = await asyncio.to_thread(
+                service.create_alert_from_zap, alert_data
+            )
             logger.info("OWASP ZAP alert upsert completed")
         elif source == "trivy_sast":
-            await asyncio.to_thread(service.create_alert_from_trivy, alert_data)
+            normalized_alert = await asyncio.to_thread(
+                service.create_alert_from_trivy, alert_data
+            )
             logger.info("Trivy SAST alerts upsert completed")
         else:
             logger.warning("Unknown source: %s", source)
             return
+
+        # Si el mapper devolvió una alerta normalizada, enviarla al endpoint externo
+        if normalized_alert:
+            await _send_normalized_alert(normalized_alert, source)  # type: ignore
+        else:
+            logger.warning(
+                "No normalized alert returned from AlertService for source=%s", source
+            )
+
     except Exception as e:
         logger.exception(
             "Error executing AlertService in background for id=%s: %s",
@@ -136,7 +206,8 @@ async def webhook(
     Endpoint GitHub App webhooks (Dependabot, …)
     - Verifica X-Hub-Signature-256
     - Responde rápido a ping
-    - Normaliza payload y dispara AlertService en background
+    - Normaliza payload con AlertService mappers y dispara en background
+    - Envía alertas normalizadas a endpoint externo
     """
     if not DEBUG and not WEBHOOK_SECRET:
         logger.error("WEBHOOK_SECRET not configured (and DEBUG is false).")
