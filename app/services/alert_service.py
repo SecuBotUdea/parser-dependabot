@@ -18,18 +18,19 @@ class AlertService:
         self.zap_mapper = ZapMapper()
         self.trivy_mapper = TrivyMapper()
 
-    def create_alert_from_dependabot(self, webhook_data: dict) -> AlertModel:
+    def create_alert_from_dependabot(self, alert_data: dict) -> AlertModel:
         """
-        Procesa un webhook de Dependabot y crea/actualiza un alert.
-
+        Procesa los datos de una alerta de Dependabot y crea/actualiza un alert.
+    
         Args:
-            webhook_data: Datos completos del webhook de Dependabot
-
+            alert_data: Contenido del campo 'alert' del webhook de Dependabot,
+                        no el webhook completo.
+    
         Returns:
             AlertModel: Alert creado/actualizado
         """
         # Mapear datos
-        alert = self.dependabot_mapper.map_to_alert(webhook_data)
+        alert = self.dependabot_mapper.map_to_alert(alert_data)
 
         # Persistir
         return self.alert_repository.upsert(alert)
