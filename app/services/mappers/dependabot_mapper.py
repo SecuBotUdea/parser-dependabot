@@ -49,7 +49,7 @@ class DependabotMapper:
         status = DependabotMapper._extract_status(alert_data)
         external_references_score = DependabotMapper._extract_cvss_score(security_advisory)
 
-        location = alert_data.get("html_url")
+        location = alert_data.get("html_url") or None
 
         title = security_advisory.get("summary") or f"Dependabot alert for {package_name}"
 
