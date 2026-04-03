@@ -1,7 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Literal
-
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -32,21 +31,17 @@ class Alert(BaseModel):
     alert_id: str
     source_type: AlertSource
     source_id: str
-
     title: str
     severity: AlertSeverity = AlertSeverity.unknown
-    external_references_score: str
+    external_references_score: Optional[float] = None
     status: AlertStatus = AlertStatus.unknown
     component: str
-    location: str
-
+    location: Optional[str] = None
     first_seen: datetime
     last_seen: Optional[datetime] = None
-
     normalized_payload: Dict[str, Any] = Field(default_factory=dict)
     raw_payload: Dict[str, Any] = Field(default_factory=dict)
     lifecycle_history: List[Dict[str, Any]] = Field(default_factory=list)
-
     reopen_count: int = 0
     version: int = 1
 
