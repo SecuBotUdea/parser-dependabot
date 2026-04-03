@@ -17,6 +17,10 @@ class AlertRepository(BaseRepository[AlertModel]):
         """Inserta o actualiza un alert."""
         data = entity.model_dump(mode="json")
         response = self.supabase.table(self.table_name).upsert(data).execute()
+
+        if not response.data:
+            raise Exception("No se pudo realizar el upsert en la tabla alert")
+        
         return AlertModel(**response.data[0])
 
     def get_by_id(self, entity_id: str) -> Optional[AlertModel]:
@@ -25,10 +29,11 @@ class AlertRepository(BaseRepository[AlertModel]):
             response = (
                 self.supabase.table(self.table_name)
                 .select("*")
-                .eq("alert_id", entity_id)  # 👈 Cambiar de "id" a "alert_id"
-                .single()
+                .eq("alert_id", entity_id)
+                .maybe_single()
                 .execute()
             )
             return AlertModel(**response.data) if response.data else None
-        except Exception:
+        except Exception as e:
+            print(f"Error al obtener alerta: {e}") # Útil para debug escolar
             return None
