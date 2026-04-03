@@ -35,8 +35,10 @@ class Alert(BaseModel):
 
     title: str
     severity: AlertSeverity = AlertSeverity.unknown
+    external_references: str
     status: AlertStatus = AlertStatus.unknown
     component: str
+    location: str
 
     first_seen: datetime
     last_seen: Optional[datetime] = None
