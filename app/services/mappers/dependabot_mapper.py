@@ -1,168 +1,211 @@
 import hashlib
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
-from app.models.alert_model import Alert
+from app.models.alert_model import Alert, AlertSeverity, AlertSource, AlertStatus
 
 
 class DependabotMapper:
     """
-    Mapper para transformar datos del webhook de Dependabot al modelo Alert.
+    Convierte un objeto `alert` de Dependabot al modelo canónico `Alert`.
+    Entrada esperada: solo el contenido de la alerta, no el webhook completo.
     """
 
-    # Constantes de mapeo
     SEVERITY_MAP = {
-        "low": "low",
-        "medium": "medium",
-        "high": "high",
-        "critical": "critical",
+        "informational": AlertSeverity.informational,
+        "low": AlertSeverity.low,
+        "medium": AlertSeverity.medium,
+        "high": AlertSeverity.high,
+        "critical": AlertSeverity.critical,
+    }
+
+    STATUS_MAP = {
+        "open": AlertStatus.open,
+        "fixed": AlertStatus.fixed,
+        "dismissed": AlertStatus.dismissed,
+        "resolved": AlertStatus.resolved,
     }
 
     @staticmethod
-    def map_to_alert(webhook_data: Dict[str, Any]) -> Alert:
-        """
-        Mapea la estructura del webhook de Dependabot al modelo Alert.
-
-        Args:
-            webhook_data: Datos completos del webhook de Dependabot
-
-        Returns:
-            Alert con los datos mapeados
-        """
-        alert_data = webhook_data.get("alert", {})
-        repository = webhook_data.get("repository", {})
-        security_advisory = alert_data.get("security_advisory", {})
+    def map_to_alert(alert_data: Dict[str, Any]) -> Alert:
         dependency = alert_data.get("dependency", {})
+        security_advisory = alert_data.get("security_advisory", {})
+        security_vulnerability = alert_data.get("security_vulnerability", {})
 
-        # Generar signature única basada en CVE/GHSA + repo + paquete
-        signature = DependabotMapper._generate_signature(
-            security_advisory, repository, dependency
+        package = dependency.get("package", {})
+        package_name = package.get("name", "unknown")
+        ecosystem = package.get("ecosystem", "unknown")
+
+        created_at = DependabotMapper._parse_datetime(alert_data.get("created_at"))
+        updated_at = DependabotMapper._parse_datetime(alert_data.get("updated_at"))
+
+        source_id = str(alert_data.get("number", "unknown"))
+        alert_id = DependabotMapper._generate_alert_id(alert_data)
+
+        severity = DependabotMapper._extract_severity(
+            security_advisory, security_vulnerability
         )
+        status = DependabotMapper._extract_status(alert_data)
+        external_references_score = DependabotMapper._extract_cvss_score(security_advisory)
 
-        # Extraer severidad normalizada
-        severity = DependabotMapper._extract_severity(security_advisory)
+        location = alert_data.get("html_url")
 
-        # Generar normalized_payload
+        title = security_advisory.get("summary") or f"Dependabot alert for {package_name}"
+
         normalized_payload = {
+            "source": "dependabot",
+            "number": alert_data.get("number"),
+            "state": alert_data.get("state", "unknown"),
+            "title": title,
             "cve_id": security_advisory.get("cve_id"),
             "ghsa_id": security_advisory.get("ghsa_id"),
             "cvss_score": DependabotMapper._extract_cvss_score(security_advisory),
-            "description": security_advisory.get("summary", ""),
             "package": {
-                "name": dependency.get("package", {}).get("name", "unknown"),
-                "ecosystem": dependency.get("package", {}).get("ecosystem", "unknown"),
+                "name": package_name,
+                "ecosystem": ecosystem,
             },
-            "manifest_path": dependency.get("manifest_path", ""),
-            "vulnerable_version_range": security_advisory.get("vulnerabilities", [{}])[
-                0
-            ].get("vulnerable_version_range", ""),
-            "patched_version": security_advisory.get("vulnerabilities", [{}])[0]
-            .get("first_patched_version", {})
-            .get("identifier", ""),
+            "manifest_path": dependency.get("manifest_path"),
+            "scope": dependency.get("scope"),
+            "vulnerable_version_range": DependabotMapper._extract_vulnerable_version_range(
+                security_advisory, security_vulnerability
+            ),
+            "patched_version": DependabotMapper._extract_patched_version(
+                security_advisory, security_vulnerability
+            ),
             "references": [
-                ref.get("url") for ref in security_advisory.get("references", [])
+                ref.get("url")
+                for ref in security_advisory.get("references", [])
+                if ref.get("url")
             ],
-            "cwes": [cwe.get("cwe_id") for cwe in security_advisory.get("cwes", [])],
+            "identifiers": [
+                {
+                    "type": item.get("type"),
+                    "value": item.get("value"),
+                }
+                for item in security_advisory.get("identifiers", [])
+                if item.get("type") and item.get("value")
+            ],
         }
 
-        # Crear lifecycle history entry inicial
         lifecycle_history = [
             {
-                "timestamp": alert_data.get(
-                    "created_at", datetime.utcnow().isoformat()
-                ),
-                "status": "open",
+                "timestamp": created_at.isoformat(),
+                "status": status.value,
                 "action": "created",
                 "actor": "dependabot",
             }
         ]
 
         return Alert(
-            alert_id=DependabotMapper._generate_alert_id(repository, alert_data),
-            signature=signature,
-            source_id="dependabot",
+            alert_id=alert_id,
+            source_type=AlertSource.dependabot,
+            source_id=source_id,
+            title=title,
             severity=severity,
-            component=dependency.get("package", {}).get("name", "unknown"),
-            status=alert_data.get("state", "open"),
-            first_seen=DependabotMapper._parse_datetime(alert_data.get("created_at")),
-            last_seen=DependabotMapper._parse_datetime(alert_data.get("updated_at")),
-            quality="high",  # Dependabot siempre tiene buena calidad
+            external_references_score=external_references_score,
+            status=status,
+            component=package_name,
+            location=location,
+            first_seen=created_at,
+            last_seen=updated_at,
             normalized_payload=normalized_payload,
+            raw_payload=alert_data,
             lifecycle_history=lifecycle_history,
             reopen_count=0,
-            last_reopened_at=None,
             version=1,
         )
 
     @staticmethod
-    def _generate_signature(
-        security_advisory: Dict[str, Any],
-        repository: Dict[str, Any],
-        dependency: Dict[str, Any],
-    ) -> str:
-        """
-        Genera una firma única para identificar la alerta.
-        Basada en: CVE/GHSA + repo + paquete
-        """
-        cve_id = security_advisory.get("cve_id") or security_advisory.get(
-            "ghsa_id", "unknown"
-        )
-        repo_name = repository.get("full_name", "unknown")
-        package_name = dependency.get("package", {}).get("name", "unknown")
+    def _generate_alert_id(alert_data: Dict[str, Any]) -> str:
+        html_url = alert_data.get("html_url")
+        number = alert_data.get("number", "unknown")
 
-        signature_string = f"{cve_id}:{repo_name}:{package_name}"
-        return hashlib.sha256(signature_string.encode()).hexdigest()[:16]
+        if html_url:
+            parsed = urlparse(html_url)
+            parts = [part for part in parsed.path.split("/") if part]
+
+            # Esperado: /OWNER/REPO/security/dependabot/NUMBER
+            if len(parts) >= 2:
+                repo = f"{parts[0]}-{parts[1]}".lower()
+                return f"dependabot-{repo}-{number}"
+
+            digest = hashlib.sha256(html_url.encode("utf-8")).hexdigest()[:16]
+            return f"dependabot-{digest}-{number}"
+
+        return f"dependabot-unknown-{number}"
 
     @staticmethod
-    def _extract_cvss_score(security_advisory: Dict[str, Any]) -> float:
-        """Extrae el CVSS score del security advisory."""
-        # Priorizar CVSS v4, luego v3
+    def _extract_status(alert_data: Dict[str, Any]) -> AlertStatus:
+        state = str(alert_data.get("state", "unknown")).lower()
+        return DependabotMapper.STATUS_MAP.get(state, AlertStatus.unknown)
+
+    @staticmethod
+    def _extract_severity(
+        security_advisory: Dict[str, Any],
+        security_vulnerability: Dict[str, Any],
+    ) -> AlertSeverity:
+        raw_severity = (
+            security_advisory.get("severity")
+            or security_vulnerability.get("severity")
+            or "unknown"
+        )
+        return DependabotMapper.SEVERITY_MAP.get(
+            str(raw_severity).lower(),
+            AlertSeverity.unknown,
+        )
+
+    @staticmethod
+    def _extract_cvss_score(security_advisory: Dict[str, Any]) -> Optional[float]:
         cvss_severities = security_advisory.get("cvss_severities", {})
 
-        cvss_v4 = cvss_severities.get("cvss_v4", {})
-        if cvss_v4.get("score", 0.0) > 0:
-            return cvss_v4.get("score", 0.0)
+        for key in ("cvss_v4", "cvss_v3"):
+            score = cvss_severities.get(key, {}).get("score")
+            if isinstance(score, (int, float)) and score > 0:
+                return float(score)
 
-        cvss_v3 = cvss_severities.get("cvss_v3", {})
-        if cvss_v3.get("score", 0.0) > 0:
-            return cvss_v3.get("score", 0.0)
+        score = security_advisory.get("cvss", {}).get("score")
+        if isinstance(score, (int, float)) and score > 0:
+            return float(score)
 
-        # Fallback al campo cvss legacy
-        cvss_data = security_advisory.get("cvss", {})
-        return cvss_data.get("score", 0.0)
-
-    @staticmethod
-    def _extract_severity(security_advisory: Dict[str, Any]) -> str:
-        """
-        Extrae la severidad como texto normalizado.
-        """
-        severity_text = security_advisory.get("severity", "medium").lower()
-        return DependabotMapper.SEVERITY_MAP.get(severity_text, "medium")
+        return None
 
     @staticmethod
-    def _generate_alert_id(
-        repository: Dict[str, Any], alert_data: Dict[str, Any]
-    ) -> str:
-        """
-        Genera un ID único basado en el repositorio y el número de alert.
-        Formato: dependabot-{owner}-{repo}-{number}
-        """
-        repo_full_name = repository.get("full_name", "unknown-repo")
-        alert_number = alert_data.get("number", "unknown")
+    def _extract_vulnerable_version_range(
+        security_advisory: Dict[str, Any],
+        security_vulnerability: Dict[str, Any],
+    ) -> Optional[str]:
+        vulnerabilities = security_advisory.get("vulnerabilities", [])
+        if vulnerabilities:
+            value = vulnerabilities[0].get("vulnerable_version_range")
+            if value:
+                return value
 
-        # Reemplazar caracteres especiales
-        repo_safe = repo_full_name.replace("/", "-").lower()
-
-        return f"dependabot-{repo_safe}-{alert_number}"
+        value = security_vulnerability.get("vulnerable_version_range")
+        return value or None
 
     @staticmethod
-    def _parse_datetime(dt_string: str) -> datetime:
-        """Parsea una fecha ISO 8601 a datetime."""
+    def _extract_patched_version(
+        security_advisory: Dict[str, Any],
+        security_vulnerability: Dict[str, Any],
+    ) -> Optional[str]:
+        vulnerabilities = security_advisory.get("vulnerabilities", [])
+        if vulnerabilities:
+            patched = vulnerabilities[0].get("first_patched_version", {})
+            identifier = patched.get("identifier")
+            if identifier:
+                return identifier
+
+        patched = security_vulnerability.get("first_patched_version", {})
+        identifier = patched.get("identifier")
+        return identifier or None
+
+    @staticmethod
+    def _parse_datetime(dt_string: Optional[str]) -> datetime:
         if not dt_string:
             return datetime.utcnow()
 
         try:
-            # Manejar formato con Z
             if dt_string.endswith("Z"):
                 dt_string = dt_string[:-1] + "+00:00"
             return datetime.fromisoformat(dt_string)
