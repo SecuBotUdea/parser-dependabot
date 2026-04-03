@@ -35,7 +35,7 @@ class Alert(BaseModel):
 
     title: str
     severity: AlertSeverity = AlertSeverity.unknown
-    external_references: str
+    external_references_score: str
     status: AlertStatus = AlertStatus.unknown
     component: str
     location: str
