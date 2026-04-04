@@ -47,11 +47,15 @@ class DependabotMapper:
             security_advisory, security_vulnerability
         )
         status = DependabotMapper._extract_status(alert_data)
-        external_references_score = DependabotMapper._extract_cvss_score(security_advisory)
+        external_references_score = DependabotMapper._extract_cvss_score(
+            security_advisory
+        )
 
         location = alert_data.get("html_url") or None
 
-        title = security_advisory.get("summary") or f"Dependabot alert for {package_name}"
+        title = (
+            security_advisory.get("summary") or f"Dependabot alert for {package_name}"
+        )
 
         normalized_payload = {
             "source": "dependabot",

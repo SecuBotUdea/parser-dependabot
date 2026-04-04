@@ -20,7 +20,7 @@ class AlertRepository(BaseRepository[AlertModel]):
 
         if not response.data:
             raise Exception("No se pudo realizar el upsert en la tabla alert")
-        
+
         return AlertModel(**response.data[0])
 
     def get_by_id(self, entity_id: str) -> Optional[AlertModel]:
@@ -35,5 +35,5 @@ class AlertRepository(BaseRepository[AlertModel]):
             )
             return AlertModel(**response.data) if response.data else None
         except Exception as e:
-            print(f"Error al obtener alerta: {e}") # Útil para debug escolar
+            print(f"Error al obtener alerta: {e}")  # Útil para debug escolar
             return None

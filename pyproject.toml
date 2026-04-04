@@ -21,3 +21,7 @@ dev = [
     "pre-commit",
     "pytest-cov"
 ]
+
+[tool.isort]
+profile = "black"
+line_length = 88 # El estándar de Black

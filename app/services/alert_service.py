@@ -21,11 +21,11 @@ class AlertService:
     def create_alert_from_dependabot(self, alert_data: dict) -> AlertModel:
         """
         Procesa los datos de una alerta de Dependabot y crea/actualiza un alert.
-    
+
         Args:
             alert_data: Contenido del campo 'alert' del webhook de Dependabot,
                         no el webhook completo.
-    
+
         Returns:
             AlertModel: Alert creado/actualizado
         """
