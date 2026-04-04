@@ -86,7 +86,7 @@ async def webhook(
 
     try:
         asyncio.create_task(
-            _enqueue_upsert(payload.alert, alert_service, source=source)
+            _enqueue_upsert(payload.get("alert"), alert_service, source=source)
         )
     except Exception as e:
         logger.exception(
