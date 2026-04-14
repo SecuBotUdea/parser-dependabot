@@ -25,3 +25,8 @@ dev = [
 [tool.isort]
 profile = "black"
 line_length = 88 # El estándar de Black
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
