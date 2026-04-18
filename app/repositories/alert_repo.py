@@ -15,7 +15,7 @@ class AlertRepository(BaseRepository[AlertModel]):
 
     def upsert(self, entity: AlertModel) -> AlertModel:
         """Inserta o actualiza un alert."""
-        data = entity.model_dump(mode="json")
+        data = entity.model_dump(mode="json", exclude_none=True)
         response = self.supabase.table(self.table_name).upsert(data).execute()
 
         if not response.data:
