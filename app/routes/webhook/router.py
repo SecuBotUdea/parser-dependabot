@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import uuid
@@ -101,12 +100,7 @@ async def webhook(
         raise HTTPException(status_code=400, detail="Error detecting alert source")
 
     try:
-        asyncio.create_task(
-            _enqueue_upsert(payload.get("alert"), alert_service, source=source)
-        )
-        logger.info(
-            f"[{alert_id}] Task created for background processing (source={source})"
-        )
+        await _enqueue_upsert(payload.get("alert"), alert_service, source=source)
     except Exception as e:
         logger.error(f"[{alert_id}] ERROR scheduling AlertService task: {e}")
         raise HTTPException(status_code=500, detail="Error scheduling background task")
