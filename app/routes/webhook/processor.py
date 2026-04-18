@@ -92,7 +92,9 @@ async def _enqueue_upsert(
             return
 
         if normalized_alert:
-            await _send_normalized_alert(normalized_alert, source)
+            await _send_normalized_alert(
+                normalized_alert.model_dump(mode="json"), source
+            )
         else:
             logger.info(
                 "No normalized alert returned from AlertService for source=%s", source
