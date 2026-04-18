@@ -67,7 +67,7 @@ async def webhook(
 
     try:
         payload = await request.json()
-        logger.info(f"[{alert_id}] payload: {payload}")
+        logger.info(f"[{alert_id}] Payload parsed successfully (type={type(payload)})")
     except Exception as e:
         logger.error(f"[{alert_id}] ERROR: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
@@ -105,7 +105,7 @@ async def webhook(
             _enqueue_upsert(payload.get("alert"), alert_service, source=source)
         )
         logger.info(
-            f"[{alert_id}] Scheduled AlertService task for delivery {delivery} (event={event})"
+            f"[{alert_id}] Task created for background processing (source={source})"
         )
     except Exception as e:
         logger.error(f"[{alert_id}] ERROR scheduling AlertService task: {e}")

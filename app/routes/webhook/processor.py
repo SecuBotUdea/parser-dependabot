@@ -68,6 +68,7 @@ async def _enqueue_upsert(
         normalized_alert = None
 
         if source == "dependabot":
+            logger.info("Processing Dependabot alert (id=%s)", alert_data.get("id"))
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
@@ -75,28 +76,30 @@ async def _enqueue_upsert(
                 "Dependabot alert upsert completed for id=%s", alert_data.get("id")
             )
         elif source == "owasp_zap":
+            logger.info("Processing OWASP ZAP alert (id=%s)", alert_data.get("id"))
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_zap, alert_data
             )
             logger.info("OWASP ZAP alert upsert completed")
         elif source == "trivy_sast":
+            logger.info("Processing Trivy SAST alert (id=%s)", alert_data.get("id"))
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_trivy, alert_data
             )
             logger.info("Trivy SAST alerts upsert completed")
         else:
-            logger.warning("Unknown source: %s", source)
+            logger.info("Unknown source: %s", source)
             return
 
         if normalized_alert:
-            await _send_normalized_alert(normalized_alert, source)  # type: ignore
+            await _send_normalized_alert(normalized_alert, source)
         else:
-            logger.warning(
+            logger.info(
                 "No normalized alert returned from AlertService for source=%s", source
             )
 
     except Exception as e:
-        logger.exception(
+        logger.error(
             "Error executing AlertService in background for id=%s: %s",
             alert_data.get("id"),
             e,
