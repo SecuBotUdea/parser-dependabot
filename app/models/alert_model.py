@@ -45,6 +45,8 @@ class Alert(BaseModel):
     lifecycle_history: List[Dict[str, Any]] = Field(default_factory=list)
     reopen_count: int = 0
     version: int = 1
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         extra = "forbid"
