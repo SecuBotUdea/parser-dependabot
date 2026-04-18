@@ -52,23 +52,23 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
                     response.text,
                 )
     except Exception as e:
-        logger.exception(
+        logger.error(
             "Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e
         )
 
 
 async def _enqueue_upsert(
     alert_data: dict, service: AlertService, source: str = "dependabot"
-) -> None:
+) -> dict:
     """
     Procesa la alerta con AlertService según la fuente y reenvía
     la alerta normalizada al endpoint externo.
     """
     try:
-        normalized_alert = None
+        normalized_alert = {}
 
         if source == "dependabot":
-            logger.info("Processing Dependabot alert (id=%s)", alert_data.get("id"))
+            logger.info("Processing Dependabot alert")
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
@@ -76,13 +76,13 @@ async def _enqueue_upsert(
                 "Dependabot alert upsert completed for id=%s", alert_data.get("id")
             )
         elif source == "owasp_zap":
-            logger.info("Processing OWASP ZAP alert (id=%s)", alert_data.get("id"))
+            logger.info("Processing OWASP ZAP alert")
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_zap, alert_data
             )
             logger.info("OWASP ZAP alert upsert completed")
         elif source == "trivy_sast":
-            logger.info("Processing Trivy SAST alert (id=%s)", alert_data.get("id"))
+            logger.info("Processing Trivy SAST alert")
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_trivy, alert_data
             )
