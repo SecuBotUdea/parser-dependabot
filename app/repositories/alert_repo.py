@@ -11,7 +11,7 @@ class AlertRepository(BaseRepository[AlertModel]):
 
     def __init__(self, supabase: Client):
         self.supabase = supabase
-        self.table_name = "alert"
+        self.table_name = "alerts"
 
     def upsert(self, entity: AlertModel) -> AlertModel:
         """Inserta o actualiza un alert."""
