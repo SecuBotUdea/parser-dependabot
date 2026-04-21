@@ -84,9 +84,14 @@ async def webhook(
 
     logger.info("Processing alert from source: %s", source)
 
+    alert_data = payload.get("alert") if isinstance(payload, dict) else None
+    if alert_data is None:
+        logger.warning("Missing 'alert' key in payload (delivery=%s)", delivery)
+        raise HTTPException(status_code=422, detail="Missing 'alert' key in payload")
+
     try:
         asyncio.create_task(
-            _enqueue_upsert(payload.get("alert"), alert_service, source=source)
+            _enqueue_upsert(alert_data, alert_service, source=source)
         )
     except Exception as e:
         logger.exception(

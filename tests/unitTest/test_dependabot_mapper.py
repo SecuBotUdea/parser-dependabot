@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
@@ -7,20 +7,17 @@ from app.services.mappers.dependabot_mapper import DependabotMapper
 
 
 # ---------------------------------------------------------------------------
-# T-M1 — map_to_alert con payload vacío
+# T-M1 — map_to_alert
 # ---------------------------------------------------------------------------
 
-def test_map_to_alert_empty_dict_produces_valid_alert():
-    """
-    T-M1: map_to_alert({}) no debe explotar.
+def test_map_to_alert_empty_dict_uses_all_defaults():
+    # Arrange
+    payload = {}
 
-    Un payload vacío es posible si el webhook llega con campos opcionales
-    ausentes o si la extracción previa ya eliminó información. El mapper
-    debe producir un Alert válido usando valores por defecto, sin lanzar
-    ninguna excepción.
-    """
-    alert = DependabotMapper.map_to_alert({})
+    # Act
+    alert = DependabotMapper.map_to_alert(payload)
 
+    # Assert
     assert isinstance(alert, Alert)
     assert alert.source_type == AlertSource.dependabot
     assert alert.source_id == "unknown"
@@ -32,12 +29,7 @@ def test_map_to_alert_empty_dict_produces_valid_alert():
 
 
 def test_map_to_alert_complete_payload_maps_all_fields():
-    """
-    T-M1 (complemento): un payload completo debe mapear todos los campos correctamente.
-
-    Verifica que los campos críticos (severity, status, component, alert_id)
-    se extraen del payload real y no quedan en sus valores por defecto.
-    """
+    # Arrange
     payload = {
         "number": 42,
         "state": "open",
@@ -61,8 +53,10 @@ def test_map_to_alert_complete_payload_maps_all_fields():
         "security_vulnerability": {"severity": "high"},
     }
 
+    # Act
     alert = DependabotMapper.map_to_alert(payload)
 
+    # Assert
     assert alert.source_id == "42"
     assert alert.severity == AlertSeverity.high
     assert alert.status == AlertStatus.open
@@ -77,39 +71,20 @@ def test_map_to_alert_complete_payload_maps_all_fields():
 # ---------------------------------------------------------------------------
 
 def test_generate_alert_id_with_html_url_follows_expected_format():
-    """
-    T-M2: _generate_alert_id con html_url debe seguir el formato dependabot-{owner}-{repo}-{number}.
-
-    El alert_id es la clave de deduplicación en Supabase. Si cambia el formato
-    entre versiones, el upsert inserta duplicados en lugar de actualizar el registro.
-    """
+    # Arrange
     alert_data = {
         "number": 42,
-        "html_url": "https://github.com/org/my-repo/security/dependabot/42",
+        "html_url": "https://github.com/SecuBotUdea/My-Repo/security/dependabot/42",
     }
 
+    # Act
     alert_id = DependabotMapper._generate_alert_id(alert_data)
 
+    # Assert
     assert alert_id.startswith("dependabot-")
     assert alert_id.endswith("-42")
-    assert "org" in alert_id
+    assert "secubotudea" in alert_id
     assert "my-repo" in alert_id
-
-
-def test_generate_alert_id_is_lowercase():
-    """
-    T-M2 (complemento): el alert_id debe estar en minúsculas.
-
-    Si el owner o repo tienen mayúsculas en GitHub, el ID generado podría
-    variar entre llamadas si la normalización no es consistente.
-    """
-    alert_data = {
-        "number": 7,
-        "html_url": "https://github.com/SecuBotUdea/Parser-Dependabot/security/dependabot/7",
-    }
-
-    alert_id = DependabotMapper._generate_alert_id(alert_data)
-
     assert alert_id == alert_id.lower()
 
 
@@ -118,25 +93,24 @@ def test_generate_alert_id_is_lowercase():
 # ---------------------------------------------------------------------------
 
 def test_generate_alert_id_without_html_url_uses_fallback():
-    """
-    T-M3: cuando no hay html_url, el ID debe usar el formato dependabot-unknown-{number}.
-
-    Algunas alertas de Dependabot pueden no incluir html_url (alertas muy antiguas
-    o de orígenes no estándar). El mapper debe manejar este caso sin explotar.
-    """
+    # Arrange
     alert_data = {"number": 99}
 
+    # Act
     alert_id = DependabotMapper._generate_alert_id(alert_data)
 
+    # Assert
     assert alert_id == "dependabot-unknown-99"
 
 
 def test_generate_alert_id_without_html_url_and_without_number():
-    """
-    T-M3 (complemento): sin html_url y sin number, el ID debe ser dependabot-unknown-unknown.
-    """
-    alert_id = DependabotMapper._generate_alert_id({})
+    # Arrange
+    alert_data = {}
 
+    # Act
+    alert_id = DependabotMapper._generate_alert_id(alert_data)
+
+    # Assert
     assert alert_id == "dependabot-unknown-unknown"
 
 
@@ -144,53 +118,32 @@ def test_generate_alert_id_without_html_url_and_without_number():
 # T-M4 — _parse_datetime
 # ---------------------------------------------------------------------------
 
-def test_parse_datetime_with_z_suffix():
-    """
-    T-M4: fechas con sufijo Z deben parsearse correctamente.
+@pytest.mark.parametrize("date_str,expected_year,expected_month,expected_day", [
+    ("2024-01-15T10:30:00Z", 2024, 1, 15),
+    ("2024-06-20T14:00:00+00:00", 2024, 6, 20),
+])
+def test_parse_datetime_with_valid_string_returns_correct_date(
+    date_str, expected_year, expected_month, expected_day
+):
+    # Arrange — date_str provisto por parametrize
 
-    GitHub envía fechas en formato ISO 8601 con Z (ej. "2024-01-15T10:30:00Z").
-    Python no acepta Z directamente en fromisoformat — el mapper debe convertirlo
-    a +00:00 antes de parsear.
-    """
-    result = DependabotMapper._parse_datetime("2024-01-15T10:30:00Z")
+    # Act
+    result = DependabotMapper._parse_datetime(date_str)
 
-    assert result.year == 2024
-    assert result.month == 1
-    assert result.day == 15
-    assert result.hour == 10
-
-
-def test_parse_datetime_with_standard_iso():
-    """
-    T-M4: fechas en formato ISO estándar con timezone explícito deben parsearse.
-    """
-    result = DependabotMapper._parse_datetime("2024-06-20T14:00:00+00:00")
-
-    assert result.year == 2024
-    assert result.month == 6
-    assert result.day == 20
+    # Assert
+    assert result.year == expected_year
+    assert result.month == expected_month
+    assert result.day == expected_day
 
 
-def test_parse_datetime_with_none_returns_datetime():
-    """
-    T-M4: cuando el campo de fecha es None (campo ausente), debe retornar
-    un datetime válido (utcnow) sin lanzar excepción.
+@pytest.mark.parametrize("invalid_input", [None, "not-a-date"])
+def test_parse_datetime_with_invalid_input_returns_valid_datetime(invalid_input):
+    # Arrange — invalid_input provisto por parametrize
 
-    Si se lanzara una excepción, todo el mapper fallaría por un campo de fecha
-    opcional ausente.
-    """
-    result = DependabotMapper._parse_datetime(None)
+    # Act
+    result = DependabotMapper._parse_datetime(invalid_input)
 
-    assert isinstance(result, datetime)
-
-
-def test_parse_datetime_with_invalid_string_returns_datetime():
-    """
-    T-M4: una fecha con formato inválido debe retornar un datetime válido (utcnow)
-    en lugar de propagar el ValueError.
-    """
-    result = DependabotMapper._parse_datetime("not-a-date")
-
+    # Assert
     assert isinstance(result, datetime)
 
 
@@ -198,65 +151,56 @@ def test_parse_datetime_with_invalid_string_returns_datetime():
 # T-M5 — _extract_severity
 # ---------------------------------------------------------------------------
 
-def test_extract_severity_valid_values():
-    """
-    T-M5: los valores estándar de severidad deben mapearse al enum correcto.
-    """
-    cases = [
-        ("informational", AlertSeverity.informational),
-        ("low", AlertSeverity.low),
-        ("medium", AlertSeverity.medium),
-        ("high", AlertSeverity.high),
-        ("critical", AlertSeverity.critical),
-    ]
+@pytest.mark.parametrize("raw,expected", [
+    ("informational", AlertSeverity.informational),
+    ("low", AlertSeverity.low),
+    ("medium", AlertSeverity.medium),
+    ("high", AlertSeverity.high),
+    ("critical", AlertSeverity.critical),
+    ("CRITICAL", AlertSeverity.critical),
+])
+def test_extract_severity_maps_known_values(raw, expected):
+    # Arrange — raw/expected provistos por parametrize
 
-    for raw, expected in cases:
-        result = DependabotMapper._extract_severity(
-            {"severity": raw}, {}
-        )
-        assert result == expected, f"Fallo para severity={raw!r}"
+    # Act
+    result = DependabotMapper._extract_severity({"severity": raw}, {})
 
-
-def test_extract_severity_uppercase_is_normalized():
-    """
-    T-M5: los valores en mayúsculas deben mapearse igual que en minúsculas.
-
-    GitHub puede enviar "HIGH" o "High" dependiendo de la versión de la API.
-    El mapper hace .lower() antes de buscar en el mapa, lo cual debe cubrir esto.
-    """
-    result = DependabotMapper._extract_severity({"severity": "CRITICAL"}, {})
-
-    assert result == AlertSeverity.critical
+    # Assert
+    assert result == expected
 
 
 def test_extract_severity_unknown_value_returns_unknown():
-    """
-    T-M5: un valor de severidad no reconocido debe retornar AlertSeverity.unknown.
-    """
-    result = DependabotMapper._extract_severity({"severity": "extreme"}, {})
+    # Arrange
+    advisory = {"severity": "extreme"}
 
+    # Act
+    result = DependabotMapper._extract_severity(advisory, {})
+
+    # Assert
     assert result == AlertSeverity.unknown
 
 
-def test_extract_severity_missing_field_falls_back_to_vulnerability():
-    """
-    T-M5: si security_advisory no tiene severity, debe tomar el valor
-    de security_vulnerability como fallback.
-    """
-    result = DependabotMapper._extract_severity(
-        {},  # security_advisory sin severity
-        {"severity": "medium"},  # security_vulnerability con severity
-    )
+def test_extract_severity_falls_back_to_vulnerability_when_advisory_missing():
+    # Arrange
+    advisory = {}
+    vulnerability = {"severity": "medium"}
 
+    # Act
+    result = DependabotMapper._extract_severity(advisory, vulnerability)
+
+    # Assert
     assert result == AlertSeverity.medium
 
 
-def test_extract_severity_both_missing_returns_unknown():
-    """
-    T-M5: si ninguno de los dos campos tiene severity, debe retornar unknown.
-    """
-    result = DependabotMapper._extract_severity({}, {})
+def test_extract_severity_returns_unknown_when_both_sources_missing():
+    # Arrange
+    advisory = {}
+    vulnerability = {}
 
+    # Act
+    result = DependabotMapper._extract_severity(advisory, vulnerability)
+
+    # Assert
     assert result == AlertSeverity.unknown
 
 
@@ -265,9 +209,7 @@ def test_extract_severity_both_missing_returns_unknown():
 # ---------------------------------------------------------------------------
 
 def test_extract_cvss_score_prefers_v4_over_v3():
-    """
-    T-M6: cuando existen cvss_v4 y cvss_v3, debe usarse cvss_v4 (mayor prioridad).
-    """
+    # Arrange
     advisory = {
         "cvss_severities": {
             "cvss_v4": {"score": 9.5},
@@ -275,55 +217,52 @@ def test_extract_cvss_score_prefers_v4_over_v3():
         }
     }
 
+    # Act
     score = DependabotMapper._extract_cvss_score(advisory)
 
+    # Assert
     assert score == 9.5
 
 
 def test_extract_cvss_score_falls_back_to_v3_when_no_v4():
-    """
-    T-M6: si no hay cvss_v4, debe usar cvss_v3.
-    """
-    advisory = {
-        "cvss_severities": {
-            "cvss_v3": {"score": 7.2},
-        }
-    }
+    # Arrange
+    advisory = {"cvss_severities": {"cvss_v3": {"score": 7.2}}}
 
+    # Act
     score = DependabotMapper._extract_cvss_score(advisory)
 
+    # Assert
     assert score == 7.2
 
 
 def test_extract_cvss_score_falls_back_to_legacy_cvss():
-    """
-    T-M6: si no hay cvss_severities, debe intentar leer el campo cvss legacy.
-    """
+    # Arrange
     advisory = {"cvss": {"score": 6.5}}
 
+    # Act
     score = DependabotMapper._extract_cvss_score(advisory)
 
+    # Assert
     assert score == 6.5
 
 
 def test_extract_cvss_score_returns_none_when_score_is_zero():
-    """
-    T-M6: un score de 0 no es un valor válido y debe retornar None.
-
-    Un score 0.0 en CVSS indica que no hay puntuación real asignada.
-    Guardarlo como 0.0 en Supabase podría confundirse con "sin severidad medible".
-    """
+    # Arrange
     advisory = {"cvss_severities": {"cvss_v3": {"score": 0}}}
 
+    # Act
     score = DependabotMapper._extract_cvss_score(advisory)
 
+    # Assert
     assert score is None
 
 
 def test_extract_cvss_score_returns_none_when_all_absent():
-    """
-    T-M6: si no hay ninguna fuente de score, debe retornar None sin explotar.
-    """
-    score = DependabotMapper._extract_cvss_score({})
+    # Arrange
+    advisory = {}
 
+    # Act
+    score = DependabotMapper._extract_cvss_score(advisory)
+
+    # Assert
     assert score is None

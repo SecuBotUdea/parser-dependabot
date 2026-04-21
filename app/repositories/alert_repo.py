@@ -21,7 +21,10 @@ class AlertRepository(BaseRepository[AlertModel]):
         if not response.data:
             raise Exception("No se pudo realizar el upsert en la tabla alert")
 
-        return AlertModel(**response.data[0])
+        known_fields = {
+            k: v for k, v in response.data[0].items() if k in AlertModel.model_fields
+        }
+        return AlertModel(**known_fields)
 
     def get_by_id(self, entity_id: str) -> Optional[AlertModel]:
         """Obtiene un alert por su ID."""
