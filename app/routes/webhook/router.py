@@ -87,10 +87,10 @@ async def webhook(
 
             if payload_source == "owasp_zap":
                 source = "owasp_zap"
-                payload = payload.get("payload", payload)
+                payload = payload.get("payload owasp", payload)
             elif payload_source == "trivy_sast":
                 source = "trivy_sast"
-                payload = payload.get("payload", payload)
+                payload = payload.get("payload trivy", payload)
             elif event:
                 source = "dependabot"
 
