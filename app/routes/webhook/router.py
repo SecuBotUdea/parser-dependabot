@@ -66,7 +66,7 @@ async def webhook(
 
     try:
         payload = await request.json()
-        logger.info(f"[{alert_id}] Payload parsed successfully")
+        logger.info(f"[{alert_id}] Payload: {payload}")
     except Exception as e:
         logger.error(f"[{alert_id}] ERROR: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
