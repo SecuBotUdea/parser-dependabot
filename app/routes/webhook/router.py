@@ -87,12 +87,13 @@ async def webhook(
 
             if payload_source == "owasp_zap":
                 source = "owasp_zap"
-                payload = payload.get("payload owasp", payload)
+                alert_data = payload.get("payload", payload)
             elif payload_source == "trivy_sast":
                 source = "trivy_sast"
-                payload = payload.get("payload trivy", payload)
+                alert_data = payload.get("payload", payload)
             elif event:
                 source = "dependabot"
+                alert_data = payload.get("alert", payload)
 
         logger.info("Processing alert from source: %s", source)
     except Exception as e:
@@ -100,7 +101,7 @@ async def webhook(
         raise HTTPException(status_code=400, detail="Error detecting alert source")
 
     try:
-        await _enqueue_upsert(payload.get("alert"), alert_service, source=source)
+        await _enqueue_upsert(alert_data, alert_service, source=source)
     except Exception as e:
         logger.error(f"[{alert_id}] ERROR scheduling AlertService task: {e}")
         raise HTTPException(status_code=500, detail="Error scheduling background task")
