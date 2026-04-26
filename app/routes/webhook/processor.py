@@ -30,7 +30,7 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
             "external_references_score": normalized_alert.get("external_references_score"),
             "normalized_payload": normalized_alert.get("normalized_payload", {}),
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.post(
                 FORWARD_ALERTS_URL,
                 json=alert_payload,
