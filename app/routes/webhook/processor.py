@@ -17,31 +17,28 @@ FORWARD_ALERTS_URL = os.getenv(
 
 
 async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
-    """
-    Envía la alerta normalizada al endpoint POST externo.
-    """
     try:
         alert_payload = {
-            "signature": normalized_alert.get("signature", ""),
-            "source_id": normalized_alert.get("source_id", ""),
-            "severity": normalized_alert.get("severity", "UNKNOWN"),
-            "component": normalized_alert.get("component", ""),
-            "quality": normalized_alert.get("quality", "good"),
-            "normalized_payload": normalized_alert.get("normalized_payload", {}),
             "alert_id": normalized_alert.get("alert_id", ""),
-            "status": normalized_alert.get("status", "open"),
+            "source_type": normalized_alert.get("source_type", ""),
+            "source_id": normalized_alert.get("source_id", ""),
+            "title": normalized_alert.get("title", ""),
+            "severity": normalized_alert.get("severity", "unknown"),
+            "status": normalized_alert.get("status", "unknown"),
+            "component": normalized_alert.get("component", ""),
+            "location": normalized_alert.get("location"),
+            "external_references_score": normalized_alert.get("external_references_score"),
+            "normalized_payload": normalized_alert.get("normalized_payload", {}),
         }
-
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 FORWARD_ALERTS_URL,
                 json=alert_payload,
                 headers={"Content-Type": "application/json", "X-Source": source},
             )
-
             if response.status_code in (200, 201, 202):
                 logger.info(
-                    "Successfully forwarded normalized alert to %s (alert_id=%s)",
+                    "Successfully forwarded alert to %s (alert_id=%s)",
                     FORWARD_ALERTS_URL,
                     alert_payload.get("alert_id"),
                 )
@@ -52,53 +49,42 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
                     response.text,
                 )
     except Exception as e:
-        logger.error(
-            "Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e
-        )
+        logger.error("Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e)
 
 
 async def _enqueue_upsert(
     alert_data: dict, service: AlertService, source: str = "dependabot"
-) -> dict:
-    """
-    Procesa la alerta con AlertService según la fuente y reenvía
-    la alerta normalizada al endpoint externo.
-    """
+) -> None:
     try:
-        normalized_alert = {}
-
         if source == "dependabot":
             logger.info("Processing Dependabot alert")
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
-            logger.info(
-                "Dependabot alert upsert completed for id=%s", alert_data.get("id")
-            )
+            logger.info("Dependabot alert upsert completed for id=%s", alert_data.get("id"))
+            if normalized_alert:
+                await _send_normalized_alert(normalized_alert.model_dump(mode="json"), source)
+
         elif source == "owasp_zap":
             logger.info("Processing OWASP ZAP alert")
-            normalized_alert = await asyncio.to_thread(
+            normalized_alerts = await asyncio.to_thread(
                 service.create_alert_from_zap, alert_data
             )
-            logger.info("OWASP ZAP alert upsert completed")
+            logger.info("OWASP ZAP alerts upsert completed (%d alerts)", len(normalized_alerts))
+            for alert in normalized_alerts:
+                await _send_normalized_alert(alert.model_dump(mode="json"), source)
+
         elif source == "trivy_sast":
             logger.info("Processing Trivy SAST alert")
-            normalized_alert = await asyncio.to_thread(
+            normalized_alerts = await asyncio.to_thread(
                 service.create_alert_from_trivy, alert_data
             )
-            logger.info("Trivy SAST alerts upsert completed")
-        else:
-            logger.info("Unknown source: %s", source)
-            return
+            logger.info("Trivy SAST alerts upsert completed (%d alerts)", len(normalized_alerts))
+            for alert in normalized_alerts:
+                await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
-        if normalized_alert:
-            await _send_normalized_alert(
-                normalized_alert.model_dump(mode="json"), source
-            )
         else:
-            logger.info(
-                "No normalized alert returned from AlertService for source=%s", source
-            )
+            logger.warning("Unknown source: %s", source)
 
     except Exception as e:
         logger.error(
