@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import os
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
 
+from app.models import alert_model
 from app.services.alert_service import AlertService
 
 load_dotenv()
@@ -64,38 +66,24 @@ async def _enqueue_upsert(
     try:
         if source == "dependabot":
             logger.info("Processing Dependabot alert")
-            normalized_alert = await asyncio.to_thread(
+            normalized_alert, previous_status = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
-            logger.info(
-                "Dependabot alert upsert completed for id=%s", alert_data.get("id")
-            )
-            if normalized_alert:
-                await _send_normalized_alert(
-                    normalized_alert.model_dump(mode="json"), source
-                )
+            await _handle_status_change(normalized_alert, previous_status, source)
 
         elif source == "owasp_zap":
             logger.info("Processing OWASP ZAP alert")
-            normalized_alerts = await asyncio.to_thread(
-                service.create_alert_from_zap, alert_data
-            )
-            logger.info(
-                "OWASP ZAP alerts upsert completed (%d alerts)", len(normalized_alerts)
-            )
-            for alert in normalized_alerts:
-                await _send_normalized_alert(alert.model_dump(mode="json"), source)
+            results = await asyncio.to_thread(service.create_alert_from_zap, alert_data)
+            for normalized_alert, previous_status in results:
+                await _handle_status_change(normalized_alert, previous_status, source)
 
         elif source == "trivy_sast":
             logger.info("Processing Trivy SAST alert")
-            normalized_alerts = await asyncio.to_thread(
+            results = await asyncio.to_thread(
                 service.create_alert_from_trivy, alert_data
             )
-            logger.info(
-                "Trivy SAST alerts upsert completed (%d alerts)", len(normalized_alerts)
-            )
-            for alert in normalized_alerts:
-                await _send_normalized_alert(alert.model_dump(mode="json"), source)
+            for normalized_alert, previous_status in results:
+                await _handle_status_change(normalized_alert, previous_status, source)
 
         else:
             logger.warning("Unknown source: %s", source)
@@ -106,6 +94,21 @@ async def _enqueue_upsert(
             alert_data.get("id"),
             e,
         )
+
+
+async def _handle_status_change(
+    alert: alert_model, previous_status: Optional[str], source: str
+) -> None:
+    await _send_normalized_alert(alert.model_dump(mode="json"), source)
+
+    if previous_status and previous_status != alert.status.value:
+        logger.info(
+            "Status changed for alert_id=%s: %s → %s",
+            alert.alert_id,
+            previous_status,
+            alert.status.value,
+        )
+        await _notify_secu_bot_status_change(alert, previous_status)
 
 
 async def trigger_analyzer(source_type: str, alert_id: str) -> None:
@@ -138,3 +141,34 @@ async def trigger_analyzer(source_type: str, alert_id: str) -> None:
             )
 
     logger.info("Triggered analyzer for source=%s alert_id=%s", source_type, alert_id)
+
+
+async def _notify_secu_bot_status_change(
+    alert: alert_model, previous_status: str
+) -> None:
+    try:
+        payload = {
+            "alert_id": alert.alert_id,
+            "source_type": alert.source_type.value,
+            "previous_status": previous_status,
+            "current_status": alert.status.value,
+            "component": alert.component,
+            "severity": alert.severity.value,
+        }
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.post(
+                f"{FORWARD_ALERTS_URL}/status-change",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            logger.info(
+                "Status change notified for alert_id=%s: %s → %s (HTTP %s)",
+                alert.alert_id,
+                previous_status,
+                alert.status.value,
+                response.status_code,
+            )
+    except Exception as e:
+        logger.error(
+            "Error notifying status change for alert_id=%s: %s", alert.alert_id, e
+        )

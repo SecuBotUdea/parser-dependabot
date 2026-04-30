@@ -16,15 +16,19 @@ class AlertRepository(BaseRepository[AlertModel]):
         self.supabase = supabase
         self.table_name = "alerts"
 
-    def upsert(self, entity: AlertModel) -> AlertModel:
-        """Inserta o actualiza un alert."""
+    def upsert(self, entity: AlertModel) -> tuple[AlertModel, Optional[str]]:
+        """Inserta o actualiza un alert. Retorna (alert, previous_status)."""
+
+        existing = self.get_by_id(entity.alert_id)
+        previous_status = existing.status.value if existing else None
+
         data = entity.model_dump(mode="json", exclude_none=True)
         response = self.supabase.table(self.table_name).upsert(data).execute()
 
         if not response.data:
             raise Exception("No se pudo realizar el upsert en la tabla alert")
 
-        return AlertModel(**response.data[0])
+        return AlertModel(**response.data[0]), previous_status
 
     def get_by_id(self, entity_id: str) -> Optional[AlertModel]:
         """Obtiene un alert por su ID."""
