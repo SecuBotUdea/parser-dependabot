@@ -1,5 +1,4 @@
 from typing import Optional
-
 from app.models.alert_model import Alert as AlertModel
 from app.repositories.base_repo import BaseRepository
 from app.services.mappers.dependabot_mapper import DependabotMapper
@@ -8,83 +7,26 @@ from app.services.mappers.zap_mapper import ZapMapper
 
 
 class AlertService:
-    """
-    Servicio para manejar la lógica de negocio de alertas.
-    """
 
     def __init__(self, alert_repository: BaseRepository[AlertModel]):
         self.alert_repository = alert_repository
-        self.dependabot_mapper = DependabotMapper()
-        self.zap_mapper = ZapMapper()
-        self.trivy_mapper = TrivyMapper()
 
     def create_alert_from_dependabot(self, alert_data: dict) -> AlertModel:
         """
-        Procesa los datos de una alerta de Dependabot y crea/actualiza un alert.
-
         Args:
             alert_data: Contenido del campo 'alert' del webhook de Dependabot,
                         no el webhook completo.
-
-        Returns:
-            AlertModel: Alert creado/actualizado
         """
-        # Mapear datos
-        alert = self.dependabot_mapper.map_to_alert(alert_data)
-
-        # Persistir
+        alert = DependabotMapper.map_to_alert(alert_data)
         return self.alert_repository.upsert(alert)
 
     def create_alert_from_zap(self, zap_data: dict) -> list[AlertModel]:
-        """
-        Procesa un reporte de OWASP ZAP y crea/actualiza múltiples alerts.
-
-        Args:
-            zap_data: Datos completos del reporte JSON de OWASP ZAP
-
-        Returns:
-            list[AlertModel]: Lista de alerts creados/actualizados
-        """
-        # Mapear datos (ZAP puede generar múltiples alertas)
-        alerts = self.zap_mapper.map_to_alerts(zap_data)
-
-        # Persistir cada alerta
-        created_alerts = []
-        for alert in alerts:
-            created_alert = self.alert_repository.upsert(alert)
-            created_alerts.append(created_alert)
-
-        return created_alerts
+        alerts = ZapMapper.map_to_alerts(zap_data)
+        return [self.alert_repository.upsert(alert) for alert in alerts]
 
     def create_alert_from_trivy(self, trivy_data: dict) -> list[AlertModel]:
-        """
-        Procesa un reporte de Trivy SAST y crea/actualiza múltiples alerts.
-
-        Args:
-            trivy_data: Datos completos del reporte JSON de Trivy
-
-        Returns:
-            list[AlertModel]: Lista de alerts creados/actualizados
-        """
-        # Mapear datos (Trivy puede generar múltiples alertas)
-        alerts = self.trivy_mapper.map_to_alerts(trivy_data)
-
-        # Persistir cada alerta
-        created_alerts = []
-        for alert in alerts:
-            created_alert = self.alert_repository.upsert(alert)
-            created_alerts.append(created_alert)
-
-        return created_alerts
+        alerts = TrivyMapper.map_to_alerts(trivy_data)
+        return [self.alert_repository.upsert(alert) for alert in alerts]
 
     def get_alert(self, alert_id: str) -> Optional[AlertModel]:
-        """
-        Obtiene un alert por su ID.
-
-        Args:
-            alert_id: ID del alert
-
-        Returns:
-            AlertModel o None si no existe
-        """
         return self.alert_repository.get_by_id(alert_id)
