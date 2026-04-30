@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from app.routes.items.get_alert_service import get_alert_service
 from app.services.alert_service import AlertService
 
-from .processor import _enqueue_upsert
+from .processor import _enqueue_upsert, trigger_analyzer
 from .security import WEBHOOK_SECRET, verify_signature
 
 load_dotenv()
@@ -108,3 +108,19 @@ async def webhook(
 
     logger.info(f"[{alert_id}] Accepted alert (delivery=%s)", delivery)
     return {"status": "accepted"}
+
+
+@router.post("/verify/{alert_id}")
+async def verify_alert(
+    alert_id: str, alert_service: AlertService = Depends(get_alert_service)
+):
+    alert = alert_service.get_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    await trigger_analyzer(alert.source_type.value, alert_id)
+    return {
+        "status": "accepted",
+        "alert_id": alert_id,
+        "source_type": alert.source_type,
+    }

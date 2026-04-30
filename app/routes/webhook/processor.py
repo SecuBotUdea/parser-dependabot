@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from app.services.alert_service import AlertService
 
 load_dotenv()
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")
 
 logger = logging.getLogger("webhook.processor")
 
@@ -27,7 +29,9 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
             "status": normalized_alert.get("status", "unknown"),
             "component": normalized_alert.get("component", ""),
             "location": normalized_alert.get("location"),
-            "external_references_score": normalized_alert.get("external_references_score"),
+            "external_references_score": normalized_alert.get(
+                "external_references_score"
+            ),
             "normalized_payload": normalized_alert.get("normalized_payload", {}),
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
@@ -49,7 +53,9 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
                     response.text,
                 )
     except Exception as e:
-        logger.error("Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e)
+        logger.error(
+            "Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e
+        )
 
 
 async def _enqueue_upsert(
@@ -61,16 +67,22 @@ async def _enqueue_upsert(
             normalized_alert = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
-            logger.info("Dependabot alert upsert completed for id=%s", alert_data.get("id"))
+            logger.info(
+                "Dependabot alert upsert completed for id=%s", alert_data.get("id")
+            )
             if normalized_alert:
-                await _send_normalized_alert(normalized_alert.model_dump(mode="json"), source)
+                await _send_normalized_alert(
+                    normalized_alert.model_dump(mode="json"), source
+                )
 
         elif source == "owasp_zap":
             logger.info("Processing OWASP ZAP alert")
             normalized_alerts = await asyncio.to_thread(
                 service.create_alert_from_zap, alert_data
             )
-            logger.info("OWASP ZAP alerts upsert completed (%d alerts)", len(normalized_alerts))
+            logger.info(
+                "OWASP ZAP alerts upsert completed (%d alerts)", len(normalized_alerts)
+            )
             for alert in normalized_alerts:
                 await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
@@ -79,7 +91,9 @@ async def _enqueue_upsert(
             normalized_alerts = await asyncio.to_thread(
                 service.create_alert_from_trivy, alert_data
             )
-            logger.info("Trivy SAST alerts upsert completed (%d alerts)", len(normalized_alerts))
+            logger.info(
+                "Trivy SAST alerts upsert completed (%d alerts)", len(normalized_alerts)
+            )
             for alert in normalized_alerts:
                 await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
@@ -92,3 +106,35 @@ async def _enqueue_upsert(
             alert_data.get("id"),
             e,
         )
+
+
+async def trigger_analyzer(source_type: str, alert_id: str) -> None:
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        logger.error("GITHUB_TOKEN or GITHUB_REPO not configured")
+        return
+
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+    async with httpx.AsyncClient() as client:
+        if source_type == "zap":
+            await client.post(
+                f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/Owasp_Zap.yml/dispatches",
+                json={"ref": "main"},
+                headers=headers,
+            )
+        elif source_type == "trivy":
+            await client.post(
+                f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/Trivy.yml/dispatches",
+                json={"ref": "main"},
+                headers=headers,
+            )
+        elif source_type == "dependabot":
+            await client.put(
+                f"https://api.github.com/repos/{GITHUB_REPO}/vulnerability-alerts",
+                headers=headers,
+            )
+
+    logger.info("Triggered analyzer for source=%s alert_id=%s", source_type, alert_id)
