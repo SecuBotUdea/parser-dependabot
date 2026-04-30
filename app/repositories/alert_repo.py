@@ -35,5 +35,5 @@ class AlertRepository(BaseRepository[AlertModel]):
             )
             return AlertModel(**response.data) if response.data else None
         except Exception as e:
-            print(f"Error al obtener alerta: {e}")  # Útil para debug escolar
+            logger.error("Error fetching alert by id=%s: %s", entity_id, e)
             return None
