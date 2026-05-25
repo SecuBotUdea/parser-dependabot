@@ -3,7 +3,7 @@ import os
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from app.routes.items.get_alert_service import get_alert_service
 from app.services.alert_service import AlertService
@@ -20,6 +20,21 @@ DEBUG = os.getenv("DEBUG", "false").lower() in ("1", "true", "yes")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _build_github_repo(alert_id: str) -> str:
+    """
+    alert_id format: {source}-{owner}-{repo}-{number}
+    ej: "dependabot-pangoaguirre-learndependabot-12"
+    Retorna "owner/repo", ej: "pangoaguirre/learndependabot"
+    """
+    parts = alert_id.split("-")
+    # quita source (primero) y number (último)
+    owner_repo = parts[1:-1]
+    # jug-eared usa "owner-repo" pero GitHub API necesita "owner/repo"
+    if len(owner_repo) >= 2:
+        return f"{owner_repo[0]}/{'-'.join(owner_repo[1:])}"
+    return "-".join(owner_repo)
 
 
 @router.post("/webhook")
@@ -112,13 +127,17 @@ async def webhook(
 
 @router.post("/verify/{alert_id}")
 async def verify_alert(
-    alert_id: str, alert_service: AlertService = Depends(get_alert_service)
+    alert_id: str,
+    alert_service: AlertService = Depends(get_alert_service),
+    x_github_token: str = Header(..., description="GitHub token provided by jug-eared"),
 ):
     alert = alert_service.get_alert(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    await trigger_analyzer(alert.source_type.value, alert_id)
+    github_repo = _build_github_repo(alert_id)
+    await trigger_analyzer(alert.source_type.value, alert_id, x_github_token, github_repo)
+
     return {
         "status": "accepted",
         "alert_id": alert_id,

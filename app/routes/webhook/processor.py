@@ -10,8 +10,6 @@ from app.models import alert_model
 from app.services.alert_service import AlertService
 
 load_dotenv()
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")
 
 logger = logging.getLogger("webhook.processor")
 
@@ -111,36 +109,36 @@ async def _handle_status_change(
         await _notify_secu_bot_status_change(alert, previous_status)
 
 
-async def trigger_analyzer(source_type: str, alert_id: str) -> None:
-    if not GITHUB_TOKEN or not GITHUB_REPO:
-        logger.error("GITHUB_TOKEN or GITHUB_REPO not configured")
+async def trigger_analyzer(source_type: str, alert_id: str, github_token: str, github_repo: str) -> None:
+    if not github_token or not github_repo:
+        logger.error("github_token or github_repo not provided for alert_id=%s", alert_id)
         return
 
     headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json",
     }
 
     async with httpx.AsyncClient() as client:
         if source_type == "zap":
             await client.post(
-                f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/Owasp_Zap.yml/dispatches",
+                f"https://api.github.com/repos/{github_repo}/actions/workflows/Owasp_Zap.yml/dispatches",
                 json={"ref": "main"},
                 headers=headers,
             )
         elif source_type == "trivy":
             await client.post(
-                f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/Trivy.yml/dispatches",
+                f"https://api.github.com/repos/{github_repo}/actions/workflows/Trivy.yml/dispatches",
                 json={"ref": "main"},
                 headers=headers,
             )
         elif source_type == "dependabot":
             await client.put(
-                f"https://api.github.com/repos/{GITHUB_REPO}/vulnerability-alerts",
+                f"https://api.github.com/repos/{github_repo}/vulnerability-alerts",
                 headers=headers,
             )
 
-    logger.info("Triggered analyzer for source=%s alert_id=%s", source_type, alert_id)
+    logger.info("Triggered analyzer for source=%s alert_id=%s repo=%s", source_type, alert_id, github_repo)
 
 
 async def _notify_secu_bot_status_change(
