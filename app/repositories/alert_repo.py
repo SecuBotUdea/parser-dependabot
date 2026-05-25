@@ -37,10 +37,10 @@ class AlertRepository(BaseRepository[AlertModel]):
                 self.supabase.table(self.table_name)
                 .select("*")
                 .eq("alert_id", entity_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            return AlertModel(**response.data) if response.data else None
+            return AlertModel(**response.data[0]) if response.data else None
         except Exception as e:
             logger.error("Error fetching alert by id=%s: %s", entity_id, e)
             return None
