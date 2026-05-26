@@ -113,9 +113,13 @@ async def _handle_status_change(
         await _notify_secu_bot_status_change(alert, previous_status)
 
 
-async def trigger_analyzer(source_type: str, alert_id: str, github_token: str, github_repo: str) -> None:
+async def trigger_analyzer(
+    source_type: str, alert_id: str, github_token: str, github_repo: str
+) -> None:
     if not github_token or not github_repo:
-        logger.error("github_token or github_repo not provided for alert_id=%s", alert_id)
+        logger.error(
+            "github_token or github_repo not provided for alert_id=%s", alert_id
+        )
         return
 
     headers = {
@@ -142,7 +146,12 @@ async def trigger_analyzer(source_type: str, alert_id: str, github_token: str, g
                 headers=headers,
             )
 
-    logger.info("Triggered analyzer for source=%s alert_id=%s repo=%s", source_type, alert_id, github_repo)
+    logger.info(
+        "Triggered analyzer for source=%s alert_id=%s repo=%s",
+        source_type,
+        alert_id,
+        github_repo,
+    )
 
 
 async def _notify_secu_bot_status_change(

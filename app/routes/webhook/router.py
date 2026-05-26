@@ -136,7 +136,9 @@ async def verify_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     github_repo = _build_github_repo(alert_id)
-    await trigger_analyzer(alert.source_type.value, alert_id, x_github_token, github_repo)
+    await trigger_analyzer(
+        alert.source_type.value, alert_id, x_github_token, github_repo
+    )
 
     return {
         "status": "accepted",
