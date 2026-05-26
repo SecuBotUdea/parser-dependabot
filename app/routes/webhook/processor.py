@@ -172,6 +172,7 @@ def _parse_github_coords(alert_id: str) -> tuple[str, str, str]:
     repo = "-".join(parts[2:-1])
     return owner, repo, source
 
+
 async def _check_watchlist(source: str, service: AlertService) -> None:
     for alert_id in list(_watchlist.keys()):
         owner, repo, alert_source = _parse_github_coords(alert_id)
@@ -186,8 +187,11 @@ async def _check_watchlist(source: str, service: AlertService) -> None:
             await _send_normalized_alert(alert.model_dump(mode="json"), source)
             _watchlist.pop(alert_id, None)
         else:
+
             async def _delayed_fixed(a=alert, aid=alert_id):
                 await asyncio.sleep(int(os.getenv("RESCAN_WAIT_SECONDS", "60")))
                 a.status = AlertStatus.fixed
                 await _send_normalized_alert(a.model_dump(mode="json"), source)
                 _watchlist.pop(aid, None)
+
+            asyncio.create_task(_delayed_fixed())
