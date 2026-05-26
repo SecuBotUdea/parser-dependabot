@@ -17,6 +17,10 @@ FORWARD_ALERTS_URL = os.getenv("FORWARD_ALERTS_URL")
 if not FORWARD_ALERTS_URL:
     raise RuntimeError("FORWARD_ALERTS_URL no configurado")
 
+FORWARD_STATUS_URL = os.getenv("FORWARD_STATUS_URL")
+if not FORWARD_STATUS_URL:
+    raise RuntimeError("FORWARD_STATUS_URL no configurado")
+
 
 async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
     try:
@@ -155,7 +159,7 @@ async def _notify_secu_bot_status_change(
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.post(
-                f"{FORWARD_ALERTS_URL}/status-change",
+                FORWARD_STATUS_URL,
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
