@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -8,7 +9,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from app.routes.items.get_alert_service import get_alert_service
 from app.services.alert_service import AlertService
 
-from .processor import _enqueue_upsert, trigger_analyzer
+from .processor import (
+    _enqueue_upsert,
+    _parse_github_coords,
+    _watchlist,
+    trigger_analyzer,
+)
 from .security import WEBHOOK_SECRET, verify_signature
 
 load_dotenv()
@@ -135,13 +141,11 @@ async def verify_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
-    github_repo = _build_github_repo(alert_id)
-    await trigger_analyzer(
-        alert.source_type.value, alert_id, x_github_token, github_repo
-    )
+    owner, repo, source = _parse_github_coords(alert_id)
+    github_repo = f"{owner}/{repo}"
 
-    return {
-        "status": "accepted",
-        "alert_id": alert_id,
-        "source_type": alert.source_type,
-    }
+    await trigger_analyzer(source, alert_id, x_github_token, github_repo)
+
+    _watchlist[alert_id] = datetime.utcnow()
+
+    return {"status": "accepted", "alert_id": alert_id}

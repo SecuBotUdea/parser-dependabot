@@ -44,3 +44,25 @@ class AlertRepository(BaseRepository[AlertModel]):
         except Exception as e:
             logger.error("Error fetching alert by id=%s: %s", entity_id, e)
             return None
+
+    def get_by_github_coords(
+        self, owner: str, repo: str, source: str
+    ) -> list[AlertModel]:
+        try:
+            prefix = f"{source}-{owner}-{repo}-"
+            response = (
+                self.supabase.table(self.table_name)
+                .select("*")
+                .like("alert_id", f"{prefix}%")
+                .execute()
+            )
+            return [AlertModel(**row) for row in response.data] if response.data else []
+        except Exception as e:
+            logger.error(
+                "Error fetching alerts by coords owner=%s repo=%s source=%s: %s",
+                owner,
+                repo,
+                source,
+                e,
+            )
+            return []

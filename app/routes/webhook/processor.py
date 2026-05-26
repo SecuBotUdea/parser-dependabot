@@ -1,13 +1,16 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
 
-from app.models.alert_model import Alert
+from app.models.alert_model import Alert, AlertStatus
 from app.services.alert_service import AlertService
+
+_watchlist: dict[str, datetime] = {}
 
 load_dotenv()
 
@@ -77,13 +80,17 @@ async def _enqueue_upsert(
             normalized_alert, previous_status = await asyncio.to_thread(
                 service.create_alert_from_dependabot, alert_data
             )
-            await _handle_status_change(normalized_alert, previous_status, source)
+            await _handle_status_change(
+                normalized_alert, previous_status, source, service
+            )
 
         elif source == "owasp_zap":
             logger.info("Processing OWASP ZAP alert")
             results = await asyncio.to_thread(service.create_alert_from_zap, alert_data)
             for normalized_alert, previous_status in results:
-                await _handle_status_change(normalized_alert, previous_status, source)
+                await _handle_status_change(
+                    normalized_alert, previous_status, source, service
+                )
 
         elif source == "trivy_sast":
             logger.info("Processing Trivy SAST alert")
@@ -91,7 +98,9 @@ async def _enqueue_upsert(
                 service.create_alert_from_trivy, alert_data
             )
             for normalized_alert, previous_status in results:
-                await _handle_status_change(normalized_alert, previous_status, source)
+                await _handle_status_change(
+                    normalized_alert, previous_status, source, service
+                )
 
         else:
             logger.warning("Unknown source: %s", source)
@@ -105,18 +114,30 @@ async def _enqueue_upsert(
 
 
 async def _handle_status_change(
-    alert: Alert, previous_status: Optional[str], source: str
+    alert: Alert, previous_status: Optional[str], source: str, service: AlertService
 ) -> None:
     await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
-    if previous_status and previous_status != alert.status.value:
-        logger.info(
-            "Status changed for alert_id=%s: %s → %s",
-            alert.alert_id,
-            previous_status,
-            alert.status.value,
+    if alert.alert_id in _watchlist:
+        owner, repo, alert_source = _parse_github_coords(alert.alert_id)
+        existing_alerts = await asyncio.to_thread(
+            service.get_alerts_by_github_coords, owner, repo, alert_source
         )
-        await _notify_secu_bot_status_change(alert, previous_status)
+        found = any(a.alert_id == alert.alert_id for a in existing_alerts)
+
+        if found:
+            alert.status = AlertStatus.open
+            await _send_normalized_alert(alert.model_dump(mode="json"), source)
+            _watchlist.pop(alert.alert_id, None)
+        else:
+
+            async def _delayed_fixed():
+                await asyncio.sleep(int(os.getenv("RESCAN_WAIT_SECONDS", "60")))
+                alert.status = AlertStatus.fixed
+                await _send_normalized_alert(alert.model_dump(mode="json"), source)
+                _watchlist.pop(alert.alert_id, None)
+
+            asyncio.create_task(_delayed_fixed())
 
 
 async def trigger_analyzer(
@@ -160,30 +181,10 @@ async def trigger_analyzer(
     )
 
 
-async def _notify_secu_bot_status_change(alert: Alert, previous_status: str) -> None:
-    try:
-        payload = {
-            "alert_id": alert.alert_id,
-            "source_type": alert.source_type.value,
-            "previous_status": previous_status,
-            "current_status": alert.status.value,
-            "component": alert.component,
-            "severity": alert.severity.value,
-        }
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.post(
-                _get_forward_status_url(),
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            logger.info(
-                "Status change notified for alert_id=%s: %s → %s (HTTP %s)",
-                alert.alert_id,
-                previous_status,
-                alert.status.value,
-                response.status_code,
-            )
-    except Exception as e:
-        logger.error(
-            "Error notifying status change for alert_id=%s: %s", alert.alert_id, e
-        )
+def _parse_github_coords(alert_id: str) -> tuple[str, str, str]:
+    parts = alert_id.split("-")
+    # formato: {source}-{owner}-{repo}-{number}
+    source = parts[0]
+    owner = parts[1]
+    repo = "-".join(parts[2:-1])
+    return owner, repo, source

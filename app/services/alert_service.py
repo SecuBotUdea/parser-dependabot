@@ -32,3 +32,8 @@ class AlertService:
 
     def get_alert(self, alert_id: str) -> Optional[AlertModel]:
         return self.alert_repository.get_by_id(alert_id)
+
+    def get_alerts_by_github_coords(
+        self, owner: str, repo: str, source: str
+    ) -> list[AlertModel]:
+        return self.alert_repository.get_by_github_coords(owner, repo, source)
