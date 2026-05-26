@@ -174,3 +174,34 @@ async def _notify_secu_bot_status_change(
         logger.error(
             "Error notifying status change for alert_id=%s: %s", alert.alert_id, e
         )
+
+async def process_rescan(alert_data: dict, service: AlertService, source: str) -> None:
+    """Usado por /verify: normaliza y notifica status-change, sin reenviar a /alerts/"""
+    try:
+        if source == "dependabot":
+            normalized_alert, previous_status = await asyncio.to_thread(
+                service.create_alert_from_dependabot, alert_data
+            )
+        elif source == "owasp_zap":
+            results = await asyncio.to_thread(service.create_alert_from_zap, alert_data)
+            for normalized_alert, previous_status in results:
+                if previous_status and previous_status != normalized_alert.status.value:
+                    await _notify_secu_bot_status_change(normalized_alert, previous_status)
+            return
+        elif source == "trivy_sast":
+            results = await asyncio.to_thread(service.create_alert_from_trivy, alert_data)
+            for normalized_alert, previous_status in results:
+                if previous_status and previous_status != normalized_alert.status.value:
+                    await _notify_secu_bot_status_change(normalized_alert, previous_status)
+            return
+        else:
+            logger.warning("Unknown source: %s", source)
+            return
+
+        if previous_status and previous_status != normalized_alert.status.value:
+            await _notify_secu_bot_status_change(normalized_alert, previous_status)
+
+    except Exception as e:
+        logger.error("Error processing rescan for id=%s: %s", alert_data.get("alert_id"), e)
+
+
