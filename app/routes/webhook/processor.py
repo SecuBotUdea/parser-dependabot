@@ -83,6 +83,7 @@ async def _enqueue_upsert(
             await _handle_status_change(
                 normalized_alert, previous_status, source, service
             )
+            await _check_watchlist(source, service)
 
         elif source == "owasp_zap":
             logger.info("Processing OWASP ZAP alert")
@@ -91,6 +92,7 @@ async def _enqueue_upsert(
                 await _handle_status_change(
                     normalized_alert, previous_status, source, service
                 )
+            await _check_watchlist(source, service)
 
         elif source == "trivy_sast":
             logger.info("Processing Trivy SAST alert")
@@ -101,6 +103,7 @@ async def _enqueue_upsert(
                 await _handle_status_change(
                     normalized_alert, previous_status, source, service
                 )
+            await _check_watchlist(source, service)
 
         else:
             logger.warning("Unknown source: %s", source)
@@ -116,28 +119,8 @@ async def _enqueue_upsert(
 async def _handle_status_change(
     alert: Alert, previous_status: Optional[str], source: str, service: AlertService
 ) -> None:
-    await _send_normalized_alert(alert.model_dump(mode="json"), source)
-
-    if alert.alert_id in _watchlist:
-        owner, repo, alert_source = _parse_github_coords(alert.alert_id)
-        existing_alerts = await asyncio.to_thread(
-            service.get_alerts_by_github_coords, owner, repo, alert_source
-        )
-        found = any(a.alert_id == alert.alert_id for a in existing_alerts)
-
-        if found:
-            alert.status = AlertStatus.open
-            await _send_normalized_alert(alert.model_dump(mode="json"), source)
-            _watchlist.pop(alert.alert_id, None)
-        else:
-
-            async def _delayed_fixed():
-                await asyncio.sleep(int(os.getenv("RESCAN_WAIT_SECONDS", "60")))
-                alert.status = AlertStatus.fixed
-                await _send_normalized_alert(alert.model_dump(mode="json"), source)
-                _watchlist.pop(alert.alert_id, None)
-
-            asyncio.create_task(_delayed_fixed())
+    if alert.alert_id not in _watchlist:
+        await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
 
 async def trigger_analyzer(
@@ -188,3 +171,23 @@ def _parse_github_coords(alert_id: str) -> tuple[str, str, str]:
     owner = parts[1]
     repo = "-".join(parts[2:-1])
     return owner, repo, source
+
+async def _check_watchlist(source: str, service: AlertService) -> None:
+    for alert_id in list(_watchlist.keys()):
+        owner, repo, alert_source = _parse_github_coords(alert_id)
+        existing_alerts = await asyncio.to_thread(
+            service.get_alerts_by_github_coords, owner, repo, alert_source
+        )
+        found = any(a.alert_id == alert_id for a in existing_alerts)
+        alert = await asyncio.to_thread(service.get_alert, alert_id)
+
+        if found:
+            alert.status = AlertStatus.open
+            await _send_normalized_alert(alert.model_dump(mode="json"), source)
+            _watchlist.pop(alert_id, None)
+        else:
+            async def _delayed_fixed(a=alert, aid=alert_id):
+                await asyncio.sleep(int(os.getenv("RESCAN_WAIT_SECONDS", "60")))
+                a.status = AlertStatus.fixed
+                await _send_normalized_alert(a.model_dump(mode="json"), source)
+                _watchlist.pop(aid, None)
