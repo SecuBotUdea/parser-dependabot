@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -22,6 +23,18 @@ class ZapMapper:
 
     @staticmethod
     def map_to_alerts(zap_report: Dict[str, Any]) -> List[Alert]:
+        logger = logging.getLogger(__name__)
+
+        # Validar estructura mínima
+        if not zap_report:
+            logger.error("ZAP mapper: zap_report vacío")
+            raise ValueError("zap_report no puede estar vacío")
+
+        sites = zap_report.get("site", [])
+        if not sites:
+            logger.warning("ZAP mapper: no hay sitios en zap_report")
+            return []
+
         alerts = []
         sites = zap_report.get("site", [])
 

@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -29,6 +30,28 @@ class DependabotMapper:
 
     @staticmethod
     def map_to_alert(alert_data: Dict[str, Any]) -> Alert:
+        logger = logging.getLogger(__name__)
+
+        # Validar estructura mínima
+        if not alert_data:
+            logger.error("Dependabot mapper: alert_data vacío")
+            raise ValueError("alert_data no puede estar vacío")
+
+        if "number" not in alert_data:
+            logger.error("Dependabot mapper: falta campo 'number' en alert_data")
+            raise ValueError("Campo requerido 'number' faltante")
+
+        if "dependency" not in alert_data or not alert_data.get("dependency"):
+            logger.warning("Dependabot mapper: 'dependency' vacío o faltante")
+
+        if (
+            "security_advisory" not in alert_data
+            and "security_vulnerability" not in alert_data
+        ):
+            logger.warning(
+                "Dependabot mapper: falta 'security_advisory' y 'security_vulnerability'"
+            )
+
         dependency = alert_data.get("dependency", {})
         security_advisory = alert_data.get("security_advisory", {})
         security_vulnerability = alert_data.get("security_vulnerability", {})

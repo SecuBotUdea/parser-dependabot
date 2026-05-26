@@ -29,3 +29,6 @@ class AlertService:
     ) -> list[tuple[AlertModel, Optional[str]]]:
         alerts = TrivyMapper.map_to_alerts(trivy_data)
         return [self.alert_repository.upsert(alert) for alert in alerts]
+
+    def get_alert(self, alert_id: str) -> Optional[AlertModel]:
+        return self.alert_repository.get_by_id(alert_id)

@@ -6,20 +6,26 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 
-from app.models import alert_model
+from app.models.alert_model import Alert
 from app.services.alert_service import AlertService
 
 load_dotenv()
 
 logger = logging.getLogger("webhook.processor")
 
-FORWARD_ALERTS_URL = os.getenv("FORWARD_ALERTS_URL")
-if not FORWARD_ALERTS_URL:
-    raise RuntimeError("FORWARD_ALERTS_URL no configurado")
 
-FORWARD_STATUS_URL = os.getenv("FORWARD_STATUS_URL")
-if not FORWARD_STATUS_URL:
-    raise RuntimeError("FORWARD_STATUS_URL no configurado")
+def _get_forward_alerts_url() -> str:
+    url = os.getenv("FORWARD_ALERTS_URL")
+    if not url:
+        raise RuntimeError("FORWARD_ALERTS_URL no configurado en .env")
+    return url
+
+
+def _get_forward_status_url() -> str:
+    url = os.getenv("FORWARD_STATUS_URL")
+    if not url:
+        raise RuntimeError("FORWARD_STATUS_URL no configurado en .env")
+    return url
 
 
 async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
@@ -40,14 +46,14 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.post(
-                FORWARD_ALERTS_URL,
+                _get_forward_alerts_url(),
                 json=alert_payload,
                 headers={"Content-Type": "application/json", "X-Source": source},
             )
             if response.status_code in (200, 201, 202):
                 logger.info(
                     "Successfully forwarded alert to %s (alert_id=%s)",
-                    FORWARD_ALERTS_URL,
+                    _get_forward_alerts_url(),
                     alert_payload.get("alert_id"),
                 )
             else:
@@ -58,7 +64,7 @@ async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
                 )
     except Exception as e:
         logger.error(
-            "Error forwarding normalized alert to %s: %s", FORWARD_ALERTS_URL, e
+            "Error forwarding normalized alert to %s: %s", _get_forward_alerts_url(), e
         )
 
 
@@ -99,7 +105,7 @@ async def _enqueue_upsert(
 
 
 async def _handle_status_change(
-    alert: alert_model, previous_status: Optional[str], source: str
+    alert: Alert, previous_status: Optional[str], source: str
 ) -> None:
     await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
@@ -154,9 +160,7 @@ async def trigger_analyzer(
     )
 
 
-async def _notify_secu_bot_status_change(
-    alert: alert_model, previous_status: str
-) -> None:
+async def _notify_secu_bot_status_change(alert: Alert, previous_status: str) -> None:
     try:
         payload = {
             "alert_id": alert.alert_id,
@@ -168,7 +172,7 @@ async def _notify_secu_bot_status_change(
         }
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.post(
-                FORWARD_STATUS_URL,
+                _get_forward_status_url(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )

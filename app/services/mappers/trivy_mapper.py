@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -20,6 +21,14 @@ class TrivyMapper:
 
     @staticmethod
     def map_to_alerts(trivy_report: Dict[str, Any]) -> List[Alert]:
+
+        logger = logging.getLogger(__name__)
+
+        # Validar estructura mínima
+        if not trivy_report:
+            logger.error("Trivy mapper: trivy_data vacío")
+            raise ValueError("trivy_data no puede estar vacío")
+
         alerts = []
         results = trivy_report.get("Results", [])
 

@@ -11,6 +11,6 @@ class BaseRepository(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def upsert(self, entity: T) -> T:
+    def upsert(self, entity: T) -> tuple[T, Optional[str]]:
         """Inserta o actualiza una entidad."""
         pass
