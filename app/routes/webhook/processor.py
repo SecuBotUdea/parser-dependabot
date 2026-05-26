@@ -13,9 +13,9 @@ load_dotenv()
 
 logger = logging.getLogger("webhook.processor")
 
-FORWARD_ALERTS_URL = os.getenv(
-    "FORWARD_ALERTS_URL", "https://secu-bot.vercel.app/api/v1/alerts"
-)
+FORWARD_ALERTS_URL = os.getenv("FORWARD_ALERTS_URL")
+if not FORWARD_ALERTS_URL:
+    raise RuntimeError("FORWARD_ALERTS_URL no configurado")
 
 
 async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
