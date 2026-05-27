@@ -7,12 +7,14 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 import httpx
 
+from app.models.alert_model import AlertStatus
 from app.routes.items.get_alert_service import get_alert_service
 from app.services.alert_service import AlertService
 
 from .processor import (
     _enqueue_upsert,
     _parse_github_coords,
+    _send_normalized_alert,
     _watchlist,
     trigger_analyzer,
 )
@@ -133,15 +135,20 @@ async def webhook(
 
 
 @router.post("/verify/{alert_id}")
-async def verify_alert(alert_id, alert_service, x_github_token):
+async def verify_alert(
+    alert_id: str,
+    alert_service: AlertService = Depends(get_alert_service),
+    x_github_token: str = Header(..., description="GitHub token provided by jug-eared"),
+):
     alert = alert_service.get_alert(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
     owner, repo, source = _parse_github_coords(alert_id)
+    github_repo = f"{owner}/{repo}"
 
     try:
-        await trigger_analyzer(source, alert_id, x_github_token, f"{owner}/{repo}")
+        github_state = await trigger_analyzer(source, alert_id, x_github_token, github_repo)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except FileNotFoundError as e:
@@ -153,5 +160,17 @@ async def verify_alert(alert_id, alert_service, x_github_token):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
+    # Dependabot: estado resuelto directamente desde GitHub API
+    if source == "dependabot" and github_state:
+        STATUS_MAP = {
+            "open": AlertStatus.open,
+            "fixed": AlertStatus.fixed,
+            "dismissed": AlertStatus.dismissed,
+        }
+        alert.status = STATUS_MAP.get(github_state, AlertStatus.unknown)
+        await _send_normalized_alert(alert.model_dump(mode="json"), source)
+        return {"status": "resolved", "alert_id": alert_id, "github_state": github_state}
+
+    # ZAP y Trivy: esperar webhook del workflow
     _watchlist[alert_id] = datetime.utcnow()
     return {"status": "accepted", "alert_id": alert_id}

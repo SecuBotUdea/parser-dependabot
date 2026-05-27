@@ -114,44 +114,68 @@ async def _handle_status_change(
     if alert.alert_id not in _watchlist:
         await _send_normalized_alert(alert.model_dump(mode="json"), source)
 
+async def _query_dependabot_alert_state(
+    github_repo: str, alert_number: str, headers: dict
+) -> Optional[str]:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{github_repo}/dependabot/alerts/{alert_number}",
+                headers=headers,
+            )
+    except httpx.TimeoutException:
+        logger.error("Timeout querying Dependabot alert repo=%s alert=%s", github_repo, alert_number)
+        raise
+    except httpx.RequestError as e:
+        logger.error("Network error querying Dependabot alert: %s", e)
+        raise
+
+    if response.status_code == 401:
+        raise PermissionError("GitHub token is invalid or expired")
+    if response.status_code == 403:
+        raise PermissionError("GitHub token lacks required permissions")
+    if response.status_code == 404:
+        raise FileNotFoundError(f"Dependabot alert not found for repo={github_repo} alert={alert_number}")
+    if response.status_code != 200:
+        raise RuntimeError(f"GitHub Dependabot API returned unexpected status {response.status_code}")
+
+    return response.json().get("state")
 
 async def trigger_analyzer(
     source_type: str, alert_id: str, github_token: str, github_repo: str
-) -> None:
+) -> Optional[str]:
     if not github_token or not github_repo:
         logger.error(
             "github_token or github_repo not provided for alert_id=%s", alert_id
         )
         raise ValueError("github_token and github_repo are required")
 
+    if source_type == "dependabot":
+        alert_number = alert_id.split("-")[-1]
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        return await _query_dependabot_alert_state(github_repo, alert_number, headers)
+
+    if source_type not in ("zap", "trivy"):
+        logger.error("Unknown source_type=%s for alert_id=%s", source_type, alert_id)
+        raise ValueError(f"Unknown source_type: {source_type}")
+
     headers = {
         "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json",
     }
 
+    workflow = "Owasp_Zap.yml" if source_type == "zap" else "Trivy.yml"
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            if source_type == "zap":
-                response = await client.post(
-                    f"https://api.github.com/repos/{github_repo}/actions/workflows/Owasp_Zap.yml/dispatches",
-                    json={"ref": "main"},
-                    headers=headers,
-                )
-            elif source_type == "trivy":
-                response = await client.post(
-                    f"https://api.github.com/repos/{github_repo}/actions/workflows/Trivy.yml/dispatches",
-                    json={"ref": "main"},
-                    headers=headers,
-                )
-            elif source_type == "dependabot":
-                response = await client.put(
-                    f"https://api.github.com/repos/{github_repo}/vulnerability-alerts",
-                    headers=headers,
-                )
-            else:
-                logger.error("Unknown source_type=%s for alert_id=%s", source_type, alert_id)
-                raise ValueError(f"Unknown source_type: {source_type}")
-
+            response = await client.post(
+                f"https://api.github.com/repos/{github_repo}/actions/workflows/{workflow}/dispatches",
+                json={"ref": "main"},
+                headers=headers,
+            )
     except httpx.TimeoutException:
         logger.error(
             "Timeout calling GitHub API for source=%s alert_id=%s repo=%s",
@@ -165,40 +189,20 @@ async def trigger_analyzer(
         )
         raise
 
-    # Verificar status code
     if response.status_code == 401:
-        logger.error(
-            "GitHub token unauthorized for source=%s alert_id=%s repo=%s",
-            source_type, alert_id, github_repo,
-        )
         raise PermissionError("GitHub token is invalid or expired")
-
     if response.status_code == 403:
-        logger.error(
-            "GitHub token lacks permissions for source=%s alert_id=%s repo=%s",
-            source_type, alert_id, github_repo,
-        )
         raise PermissionError("GitHub token lacks required permissions")
-
     if response.status_code == 404:
-        logger.error(
-            "Resource not found on GitHub for source=%s alert_id=%s repo=%s — workflow may lack workflow_dispatch trigger",
-            source_type, alert_id, github_repo,
-        )
-        raise FileNotFoundError(f"GitHub resource not found for repo={github_repo} source={source_type}")
-
+        raise FileNotFoundError(f"GitHub resource not found for repo={github_repo} source={source_type} — workflow may lack workflow_dispatch trigger")
     if response.status_code not in (200, 201, 202, 204):
-        logger.error(
-            "Unexpected GitHub API response status=%s body=%s for source=%s alert_id=%s",
-            response.status_code, response.text, source_type, alert_id,
-        )
         raise RuntimeError(f"GitHub API returned unexpected status {response.status_code}")
 
     logger.info(
         "Triggered analyzer for source=%s alert_id=%s repo=%s (status=%s)",
         source_type, alert_id, github_repo, response.status_code,
     )
-
+    return None
 
 def _parse_github_coords(alert_id: str) -> tuple[str, str, str]:
     parts = alert_id.split("-")
@@ -212,6 +216,15 @@ def _parse_github_coords(alert_id: str) -> tuple[str, str, str]:
 async def _check_watchlist(source: str, service: AlertService) -> None:
     for alert_id in list(_watchlist.keys()):
         owner, repo, alert_source = _parse_github_coords(alert_id)
+
+        if alert_source == "dependabot":
+            logger.warning(
+                "Dependabot alert_id=%s found in watchlist — this should not happen, skipping",
+                alert_id,
+            )
+            _watchlist.pop(alert_id, None)
+            continue
+
         existing_alerts = await asyncio.to_thread(
             service.get_alerts_by_github_coords, owner, repo, alert_source
         )
@@ -220,14 +233,13 @@ async def _check_watchlist(source: str, service: AlertService) -> None:
 
         if found:
             alert.status = AlertStatus.open
-            await _send_normalized_alert(alert.model_dump(mode="json"), source)
+            await _send_normalized_alert(alert.model_dump(mode="json"), alert_source)  # ← alert_source
             _watchlist.pop(alert_id, None)
         else:
-
-            async def _delayed_fixed(a=alert, aid=alert_id):
+            async def _delayed_fixed(a=alert, aid=alert_id, src=alert_source):  # ← captura alert_source
                 await asyncio.sleep(int(os.getenv("RESCAN_WAIT_SECONDS", "60")))
                 a.status = AlertStatus.fixed
-                await _send_normalized_alert(a.model_dump(mode="json"), source)
+                await _send_normalized_alert(a.model_dump(mode="json"), src)
                 _watchlist.pop(aid, None)
 
             asyncio.create_task(_delayed_fixed())
