@@ -23,14 +23,6 @@ def _get_forward_alerts_url() -> str:
         raise RuntimeError("FORWARD_ALERTS_URL no configurado en .env")
     return url
 
-
-def _get_forward_status_url() -> str:
-    url = os.getenv("FORWARD_STATUS_URL")
-    if not url:
-        raise RuntimeError("FORWARD_STATUS_URL no configurado en .env")
-    return url
-
-
 async def _send_normalized_alert(normalized_alert: dict, source: str) -> None:
     try:
         alert_payload = {
@@ -130,37 +122,81 @@ async def trigger_analyzer(
         logger.error(
             "github_token or github_repo not provided for alert_id=%s", alert_id
         )
-        return
+        raise ValueError("github_token and github_repo are required")
 
     headers = {
         "Authorization": f"Bearer {github_token}",
         "Accept": "application/vnd.github+json",
     }
 
-    async with httpx.AsyncClient() as client:
-        if source_type == "zap":
-            await client.post(
-                f"https://api.github.com/repos/{github_repo}/actions/workflows/Owasp_Zap.yml/dispatches",
-                json={"ref": "main"},
-                headers=headers,
-            )
-        elif source_type == "trivy":
-            await client.post(
-                f"https://api.github.com/repos/{github_repo}/actions/workflows/Trivy.yml/dispatches",
-                json={"ref": "main"},
-                headers=headers,
-            )
-        elif source_type == "dependabot":
-            await client.put(
-                f"https://api.github.com/repos/{github_repo}/vulnerability-alerts",
-                headers=headers,
-            )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if source_type == "zap":
+                response = await client.post(
+                    f"https://api.github.com/repos/{github_repo}/actions/workflows/Owasp_Zap.yml/dispatches",
+                    json={"ref": "main"},
+                    headers=headers,
+                )
+            elif source_type == "trivy":
+                response = await client.post(
+                    f"https://api.github.com/repos/{github_repo}/actions/workflows/Trivy.yml/dispatches",
+                    json={"ref": "main"},
+                    headers=headers,
+                )
+            elif source_type == "dependabot":
+                response = await client.put(
+                    f"https://api.github.com/repos/{github_repo}/vulnerability-alerts",
+                    headers=headers,
+                )
+            else:
+                logger.error("Unknown source_type=%s for alert_id=%s", source_type, alert_id)
+                raise ValueError(f"Unknown source_type: {source_type}")
+
+    except httpx.TimeoutException:
+        logger.error(
+            "Timeout calling GitHub API for source=%s alert_id=%s repo=%s",
+            source_type, alert_id, github_repo,
+        )
+        raise
+    except httpx.RequestError as e:
+        logger.error(
+            "Network error calling GitHub API for source=%s alert_id=%s repo=%s: %s",
+            source_type, alert_id, github_repo, e,
+        )
+        raise
+
+    # Verificar status code
+    if response.status_code == 401:
+        logger.error(
+            "GitHub token unauthorized for source=%s alert_id=%s repo=%s",
+            source_type, alert_id, github_repo,
+        )
+        raise PermissionError("GitHub token is invalid or expired")
+
+    if response.status_code == 403:
+        logger.error(
+            "GitHub token lacks permissions for source=%s alert_id=%s repo=%s",
+            source_type, alert_id, github_repo,
+        )
+        raise PermissionError("GitHub token lacks required permissions")
+
+    if response.status_code == 404:
+        logger.error(
+            "Resource not found on GitHub for source=%s alert_id=%s repo=%s — workflow may lack workflow_dispatch trigger",
+            source_type, alert_id, github_repo,
+        )
+        raise FileNotFoundError(f"GitHub resource not found for repo={github_repo} source={source_type}")
+
+    if response.status_code not in (200, 201, 202, 204):
+        logger.error(
+            "Unexpected GitHub API response status=%s body=%s for source=%s alert_id=%s",
+            response.status_code, response.text, source_type, alert_id,
+        )
+        raise RuntimeError(f"GitHub API returned unexpected status {response.status_code}")
 
     logger.info(
-        "Triggered analyzer for source=%s alert_id=%s repo=%s",
-        source_type,
-        alert_id,
-        github_repo,
+        "Triggered analyzer for source=%s alert_id=%s repo=%s (status=%s)",
+        source_type, alert_id, github_repo, response.status_code,
     )
 
 

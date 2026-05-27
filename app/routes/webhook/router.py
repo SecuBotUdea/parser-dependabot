@@ -5,6 +5,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+import httpx
 
 from app.routes.items.get_alert_service import get_alert_service
 from app.services.alert_service import AlertService
@@ -132,20 +133,25 @@ async def webhook(
 
 
 @router.post("/verify/{alert_id}")
-async def verify_alert(
-    alert_id: str,
-    alert_service: AlertService = Depends(get_alert_service),
-    x_github_token: str = Header(..., description="GitHub token provided by jug-eared"),
-):
+async def verify_alert(alert_id, alert_service, x_github_token):
     alert = alert_service.get_alert(alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
     owner, repo, source = _parse_github_coords(alert_id)
-    github_repo = f"{owner}/{repo}"
 
-    await trigger_analyzer(source, alert_id, x_github_token, github_repo)
+    try:
+        await trigger_analyzer(source, alert_id, x_github_token, f"{owner}/{repo}")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except (httpx.TimeoutException, httpx.RequestError):
+        raise HTTPException(status_code=502, detail="Could not reach GitHub API")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
     _watchlist[alert_id] = datetime.utcnow()
-
     return {"status": "accepted", "alert_id": alert_id}
